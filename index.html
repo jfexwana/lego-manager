@@ -1,49 +1,44 @@
 <!DOCTYPE html>
 <html lang="fr">
+<head>
   <meta charset="UTF-8">
-  <!-- META TAGS PWA - À ajouter juste après <meta charset="UTF-8"> -->
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="LEGO Manager">
-<meta name="theme-color" content="#d32f2f">
+  <!-- META TAGS PWA -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="LEGO Manager">
+  <meta name="theme-color" content="#d32f2f">
 
-<!-- PWA MANIFEST -->
-<link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="./icon-192.png">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- PWA MANIFEST -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+  
   <title>Tri Pièces LEGO (Bulk Mode - IndexedDB)</title>
   <link rel="icon" href="data:,">
-
-
   <link rel="stylesheet" href="./styles.css">
 
-  <style>
+  <script src="./unified-data-manager.js"></script>
+  <script src="./debug.js"></script>
+  <script>
+    // Détection automatique du chemin de base
+    const BASE_PATH = window.location.pathname.includes('/lego-manager/') 
+      ? '/lego-manager' 
+      : '';
 
-  </style>
-
-<script src="./unified-data-manager.js"></script>
-<script src="./debug.js"></script>
-<script>
-// Détection automatique du chemin de base
-const BASE_PATH = window.location.pathname.includes('/lego-manager/') 
-  ? '/lego-manager' 
-  : '';
-
-function navigateTo(page) {
-  window.location.href = `${BASE_PATH}/${page}`;
-}
-</script>
+    function navigateTo(page) {
+      window.location.href = `${BASE_PATH}/${page}`;
+    }
+  </script>
 </head>
 
 <body>
   <div class="container">
     <h1>Mode vrac : Tri des pièces LEGO (IndexedDB)</h1>
     
-  <div id="file-manager" class="file-manager-section">
+    <div id="file-manager" class="file-manager-section">
       <h3>Statut de la base de données LEGO (IndexedDB)</h3>
-      <p>Cette application stocke les données dans IndexedDB pour gérer les gros volumes de données.</p>
+      <p>Téléchargement et décompression automatiques depuis Rebrickable, ou import manuel de fichiers CSV.</p>
       
       <!-- Statut de la base de données -->
       <div style="background: #f0f0f0; padding: 10px; border-radius: 5px; margin: 10px 0; text-align: center;">
@@ -54,39 +49,78 @@ function navigateTo(page) {
         <!-- Les statuts des fichiers seront affichés ici -->
       </div>
       
-      <div class="upload-instructions">
-        <h4>Instructions :</h4>
-        <ol>
-          <li>Téléchargez les 4 fichiers CSV requis depuis Rebrickable :</li>
-          <ul>
-            <li><strong>parts.csv</strong> : <a href="https://cdn.rebrickable.com/media/downloads/parts.csv.gz" target="_blank">https://cdn.rebrickable.com/media/downloads/parts.csv.gz</a></li>
-            <li><strong>part_categories.csv</strong> : <a href="https://cdn.rebrickable.com/media/downloads/part_categories.csv.gz" target="_blank">https://cdn.rebrickable.com/media/downloads/part_categories.csv.gz</a></li>
-            <li><strong>inventory_parts.csv</strong> : <a href="https://cdn.rebrickable.com/media/downloads/inventory_parts.csv.gz" target="_blank">https://cdn.rebrickable.com/media/downloads/inventory_parts.csv.gz</a></li>
-            <li><strong>colors.csv</strong> : <a href="https://cdn.rebrickable.com/media/downloads/colors.csv.gz" target="_blank">https://cdn.rebrickable.com/media/downloads/colors.csv.gz</a></li>
-            <li><strong>sets.csv</strong> : <a href="https://cdn.rebrickable.com/media/downloads/sets.csv.gz" target="_blank">https://cdn.rebrickable.com/media/downloads/sets.csv.gz</a></li>
-            <li><strong>inventories.csv</strong> : <a href="https://cdn.rebrickable.com/media/downloads/inventories.csv.gz" target="_blank">https://cdn.rebrickable.com/media/downloads/inventories.csv.gz</a></li>
-            <li><strong>minifigs.csv</strong> : <a href="https://cdn.rebrickable.com/media/downloads/minifigs.csv.gz" target="_blank">https://cdn.rebrickable.com/media/downloads/minifigs.csv.gz</a></li>
-            <li><strong>inventory_minifigs.csv</strong> : <a href="https://cdn.rebrickable.com/media/downloads/inventory_minifigs.csv.gz" target="_blank">https://cdn.rebrickable.com/media/downloads/inventory_minifigs.csv.gz</a></li>
+      <!-- Boutons d'action principaux -->
+      <div style="text-align: center; margin: 20px 0; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">
+        <button class="btn" id="download-all-btn" onclick="downloadAllFiles()">
+          📥 Télécharger depuis Rebrickable
+        </button>
+        <button class="btn" onclick="document.getElementById('file-input').click()">
+          📁 Importer des CSV manuellement
+        </button>
+        <button class="btn btn-warning" onclick="checkForUpdates()">
+          🔄 Vérifier les mises à jour
+        </button>
+        <button class="btn" id="launch-app" onclick="launchApp()" disabled>
+          ▶️ Lancer l'application
+        </button>
+        <button class="btn btn-danger" onclick="clearAllData()">
+          🗑️ Effacer toutes les données
+        </button>
+      </div>
 
+      <!-- Barre de progression globale -->
+      <div id="global-progress" style="display: none; margin: 20px 0;">
+        <div style="background: #e0e0e0; border-radius: 10px; overflow: hidden; height: 30px;">
+          <div id="global-progress-bar" style="background: linear-gradient(90deg, #4caf50, #2196f3); height: 100%; width: 0%; transition: width 0.3s; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 0.9em;">
+            0%
+          </div>
+        </div>
+        <div id="global-progress-text" style="text-align: center; margin-top: 10px; font-size: 0.9em; color: #666; font-weight: 500;">
+          Initialisation...
+        </div>
+      </div>
+      
+      <!-- Zone d'upload manuel (cachée par défaut) -->
+      <div class="upload-area" id="upload-area" style="display: none; margin-top: 20px;">
+        <p>Glissez-déposez vos fichiers CSV décompressés ici</p>
+        <input type="file" id="file-input" multiple accept=".csv" style="display: none;">
+        <p><small>Fichiers acceptés : parts.csv, part_categories.csv, inventory_parts.csv, colors.csv, sets.csv, inventories.csv, minifigs.csv, inventory_minifigs.csv</small></p>
+      </div>
+
+      <!-- Instructions détaillées (repliables) -->
+      <details style="margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+        <summary style="cursor: pointer; font-weight: bold; color: #2196f3;">
+          ℹ️ Instructions détaillées
+        </summary>
+        <div class="upload-instructions" style="margin-top: 15px;">
+          <h4>Option 1 : Téléchargement automatique (Recommandé)</h4>
+          <ol>
+            <li>Cliquez sur <strong>"📥 Télécharger depuis Rebrickable"</strong></li>
+            <li>Attendez 5-10 minutes (les fichiers sont téléchargés et décompressés automatiquement)</li>
+            <li>Cliquez sur <strong>"▶️ Lancer l'application"</strong></li>
+          </ol>
+
+          <h4>Option 2 : Import manuel</h4>
+          <ol>
+            <li>Téléchargez les fichiers .gz depuis Rebrickable (liens ci-dessous)</li>
+            <li>Décompressez-les avec 7-Zip, WinRAR ou un outil similaire</li>
+            <li>Cliquez sur <strong>"📁 Importer des CSV manuellement"</strong></li>
+            <li>Sélectionnez les fichiers CSV décompressés</li>
+          </ol>
+
+          <h4>Fichiers requis :</h4>
+          <ul style="font-size: 0.9em;">
+            <li><strong>parts.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/parts.csv.gz" target="_blank">Télécharger</a></li>
+            <li><strong>part_categories.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/part_categories.csv.gz" target="_blank">Télécharger</a></li>
+            <li><strong>inventory_parts.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/inventory_parts.csv.gz" target="_blank">Télécharger</a></li>
+            <li><strong>colors.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/colors.csv.gz" target="_blank">Télécharger</a></li>
+            <li><strong>sets.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/sets.csv.gz" target="_blank">Télécharger</a></li>
+            <li><strong>inventories.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/inventories.csv.gz" target="_blank">Télécharger</a></li>
+            <li><strong>minifigs.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/minifigs.csv.gz" target="_blank">Télécharger</a></li>
+            <li><strong>inventory_minifigs.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/inventory_minifigs.csv.gz" target="_blank">Télécharger</a></li>
           </ul>
-          <li>Si les fichiers sont compressés (.gz), décompressez-les avec 7-Zip, WinRAR ou un outil similaire</li>
-          <li>Glissez-déposez les fichiers CSV décompressés dans la zone ci-dessous ou utilisez le bouton "Parcourir"</li>
-          <li>Les fichiers seront analysés et stockés dans IndexedDB automatiquement</li>
-          <li>Une fois les 3 fichiers chargés, le bouton "Lancer l'application" s'activera</li>
-        </ol>
-      </div>
-      
-      <div class="upload-area" id="upload-area">
-        <p>Glissez-déposez vos fichiers CSV ici ou <button class="btn" onclick="document.getElementById('file-input').click()">Parcourir</button></p>
-        <input type="file" id="file-input" multiple accept=".csv">
-        <p><small>Fichiers acceptés : parts.csv, part_categories.csv, inventory_parts.csv, colors.csv</small></p>
-      </div>
-      
-      <div style="text-align: center; margin: 20px 0;">
-        <button class="btn btn-warning" onclick="checkForUpdates()">Vérifier les mises à jour</button>
-        <button class="btn" id="launch-app" onclick="launchApp()" disabled>Lancer l'application</button>
-        <button class="btn btn-danger" onclick="clearAllData()">Effacer toutes les données</button>
-      </div>
+        </div>
+      </details>
     </div>
     
     <!-- Section cachée pour redirection -->
@@ -95,33 +129,36 @@ function navigateTo(page) {
     </div>
   </div>
 
- <!-- Inclure le fichier mutualisé -->
+  <!-- Scripts -->
   <script src="./lego-db.js"></script>
+  <script src="./gz-decompressor.js"></script>
 
   <script>
-    // Variables globales pour la gestion des fichiers
     let db = null;
     let csvWorker = null;
+    let decompressor = null;
 
-
-   window.onload = async function() {
-  console.log('Initialisation de l\'application...');
-  
-  // Initialiser la base de données
-  db = new window.LegoDatabase();
-  await db.init();
-  await db.verifyAndRepairStores();
-  
-  // Initialiser le worker CSV
-  csvWorker = window.createCSVWorker();
-  
-  // Configurer l'interface
-  renderInitialFileStatus();
-  setupFileManager();
-  await updateFileStatus();
-  
-  console.log('Application initialisée');
-};
+    window.onload = async function() {
+      console.log('Initialisation de l\'application...');
+      
+      // Initialiser la base de données
+      db = new window.LegoDatabase();
+      await db.init();
+      await db.verifyAndRepairStores();
+      
+      // Initialiser le décompresseur
+      decompressor = new GzDecompressor();
+      
+      // Initialiser le worker CSV
+      csvWorker = window.createCSVWorker();
+      
+      // Configurer l'interface
+      renderInitialFileStatus();
+      setupFileManager();
+      await updateFileStatus();
+      
+      console.log('Application initialisée');
+    };
 
     function renderInitialFileStatus() {
       const statusDiv = document.getElementById('file-status');
@@ -135,8 +172,7 @@ function navigateTo(page) {
         fileDiv.innerHTML = `
           <div class="file-name">${file.name}</div>
           <div class="file-status-text missing">❌ Manquant</div>
-          <div>${file.description}</div>
-          <a href="${file.url}" target="_blank" class="download-link">📥 Télécharger</a>
+          <div style="font-size: 0.85em; color: #666;">${file.description}</div>
           <div class="progress-bar" id="progress-${fileKey}" style="display:none;">
             <div class="progress-fill" id="progress-fill-${fileKey}"></div>
           </div>
@@ -145,7 +181,6 @@ function navigateTo(page) {
       }
     }
 
-    // Configuration du gestionnaire de fichiers
     function setupFileManager() {
       const uploadArea = document.getElementById('upload-area');
       const fileInput = document.getElementById('file-input');
@@ -153,6 +188,7 @@ function navigateTo(page) {
       uploadArea.addEventListener('dragover', function(e) {
         e.preventDefault();
         uploadArea.classList.add('dragover');
+        uploadArea.style.display = 'block';
       });
       
       uploadArea.addEventListener('dragleave', function(e) {
@@ -171,7 +207,6 @@ function navigateTo(page) {
       });
     }
 
-    // Mise à jour du statut des fichiers
     async function updateFileStatus() {
       const launchBtn = document.getElementById('launch-app');
       let allFilesLoaded = true;
@@ -179,31 +214,28 @@ function navigateTo(page) {
       for (const fileKey of Object.keys(REQUIRED_FILES)) {
         const fileDiv = document.getElementById(`file-${fileKey}`);
         const count = await db.getTableCount(fileKey);
-        const fileDate = await db.getFileDate(fileKey); // Récupérer la date du fichier
+        const fileDate = await db.getFileDate(fileKey);
 
         const isLoaded = count > 0;
-
         if (!isLoaded) allFilesLoaded = false;
 
-       const fileDateText = fileDate ? new Date(fileDate).toLocaleDateString() : 'Date inconnue';
+        const fileDateText = fileDate ? new Date(fileDate).toLocaleDateString() : 'Date inconnue';
 
-    fileDiv.className = `file-item ${isLoaded ? 'loaded' : 'missing'}`;
-    fileDiv.querySelector('.file-status-text').textContent = isLoaded ? '✅ Chargé' : '❌ Manquant';
-    fileDiv.querySelector('.file-status-text').className = `file-status-text ${isLoaded ? 'loaded' : 'missing'}`;
+        fileDiv.className = `file-item ${isLoaded ? 'loaded' : 'missing'}`;
+        fileDiv.querySelector('.file-status-text').textContent = isLoaded ? '✅ Chargé' : '❌ Manquant';
+        fileDiv.querySelector('.file-status-text').className = `file-status-text ${isLoaded ? 'loaded' : 'missing'}`;
 
-    if (isLoaded) {
-      const existingButtons = fileDiv.querySelectorAll('.btn-danger, .update-button');
-      existingButtons.forEach(btn => btn.remove());
-      
-      const countDiv = fileDiv.querySelector('.file-count');
-      if (!countDiv) {
-        fileDiv.innerHTML += `
-          <div class="file-count">${count.toLocaleString()} enregistrements</div>
-          <div class="file-count">Date du fichier: ${fileDateText}</div>
-          <button class="download-link btn-danger" onclick="removeFile('${fileKey}')">🗑️ Supprimer</button>
-        `;
-      } else {
-        countDiv.innerHTML = `${count.toLocaleString()} enregistrements<br>Date du fichier: ${fileDateText}`;
+        if (isLoaded) {
+          const existingButtons = fileDiv.querySelectorAll('.btn-danger, .update-button');
+          existingButtons.forEach(btn => btn.remove());
+          
+          const countDiv = fileDiv.querySelector('.file-count');
+          if (!countDiv) {
+            fileDiv.innerHTML += `
+              <div class="file-count">${count.toLocaleString()} enregistrements</div>
+              <div class="file-count">Date: ${fileDateText}</div>
+              <button class="download-link btn-danger" onclick="removeFile('${fileKey}')">🗑️ Supprimer</button>
+            `;
           }
         }
       }
@@ -214,38 +246,142 @@ function navigateTo(page) {
         : "ℹ️ Base partielle ou incomplète";
     }
 
-    // Gestion des fichiers téléchargés
+    // ============================================
+    // TÉLÉCHARGEMENT AUTOMATIQUE DEPUIS REBRICKABLE
+    // ============================================
+    async function downloadAllFiles() {
+      const downloadBtn = document.getElementById('download-all-btn');
+      downloadBtn.disabled = true;
+      downloadBtn.innerHTML = '⏳ Téléchargement...';
+      
+      const globalProgress = document.getElementById('global-progress');
+      const globalProgressBar = document.getElementById('global-progress-bar');
+      const globalProgressText = document.getElementById('global-progress-text');
+      
+      globalProgress.style.display = 'block';
+      
+      const files = Object.keys(REQUIRED_FILES);
+      let completedFiles = 0;
+      
+      for (const fileKey of files) {
+        const file = REQUIRED_FILES[fileKey];
+        
+        try {
+          globalProgressText.textContent = `📥 Téléchargement de ${file.name}...`;
+          
+          const fileDiv = document.getElementById(`file-${fileKey}`);
+          const progressBar = document.getElementById(`progress-${fileKey}`);
+          const progressFill = document.getElementById(`progress-fill-${fileKey}`);
+          
+          fileDiv.className = 'file-item processing';
+          fileDiv.querySelector('.file-status-text').textContent = '⏳ Téléchargement...';
+          fileDiv.querySelector('.file-status-text').className = 'file-status-text processing';
+          progressBar.style.display = 'block';
+          
+          // Télécharger et décompresser
+          const csvText = await decompressor.downloadAndDecompress(
+            file.url,
+            (progress) => {
+              const percent = Math.min(95, progress.percentage.toFixed(0));
+              progressFill.style.width = `${percent}%`;
+            }
+          );
+          
+          fileDiv.querySelector('.file-status-text').textContent = '⏳ Analyse CSV...';
+          
+          // Analyser le CSV
+          const data = await new Promise((resolve, reject) => {
+            csvWorker.onmessage = (e) => {
+              if (e.data.type === "done") {
+                resolve(e.data.data);
+              }
+            };
+            csvWorker.onerror = reject;
+            csvWorker.postMessage({ text: csvText });
+          });
+          
+          if (data.length === 0) {
+            throw new Error('Aucune donnée valide trouvée');
+          }
+          
+          fileDiv.querySelector('.file-status-text').textContent = '📦 Enregistrement...';
+          
+          // Nettoyer les données
+          let cleanedData = data;
+          if (fileKey === "parts") cleanedData = window.cleanPartsData(data);
+          if (fileKey === "inventory_parts") cleanedData = window.cleanInventoryPartsData(data);
+          if (fileKey === "part_categories") cleanedData = window.cleanCategoriesData(data);
+          if (fileKey === "colors") cleanedData = window.cleanColorsData(data);
+          if (fileKey === "sets") cleanedData = window.cleanSetsData(data);
+          if (fileKey === "inventories") cleanedData = window.cleanInventoriesData(data);
+          if (fileKey === "minifigs") cleanedData = window.cleanMinifigsData(data);
+          if (fileKey === "inventory_minifigs") cleanedData = window.cleanInventoryMinifigsData(data);
+          
+          // Sauvegarder dans IndexedDB
+          await db.saveData(fileKey, cleanedData);
+          await db.setFileDate(fileKey, Date.now());
+          
+          fileDiv.className = 'file-item loaded';
+          fileDiv.querySelector('.file-status-text').textContent = '✅ Chargé';
+          fileDiv.querySelector('.file-status-text').className = 'file-status-text loaded';
+          progressBar.style.display = 'none';
+          
+          completedFiles++;
+          const globalPercent = ((completedFiles / files.length) * 100).toFixed(0);
+          globalProgressBar.style.width = `${globalPercent}%`;
+          globalProgressBar.textContent = `${globalPercent}%`;
+          
+          console.log(`✅ ${file.name}: ${cleanedData.length.toLocaleString()} enregistrements`);
+          
+        } catch (error) {
+          console.error(`❌ Erreur avec ${file.name}:`, error);
+          const fileDiv = document.getElementById(`file-${fileKey}`);
+          fileDiv.className = 'file-item missing';
+          fileDiv.querySelector('.file-status-text').textContent = '❌ Erreur';
+          fileDiv.querySelector('.file-status-text').className = 'file-status-text missing';
+          
+          showErrorMessage(`Erreur avec ${file.name}: ${error.message}`);
+        }
+      }
+      
+      globalProgressText.textContent = '✅ Téléchargement terminé !';
+      
+      setTimeout(() => {
+        globalProgress.style.display = 'none';
+      }, 3000);
+      
+      downloadBtn.disabled = false;
+      downloadBtn.innerHTML = '📥 Télécharger depuis Rebrickable';
+      
+      await updateFileStatus();
+    }
+
+    // ============================================
+    // IMPORT MANUEL DE CSV
+    // ============================================
     async function handleFiles(files) {
+      document.getElementById('upload-area').style.display = 'block';
+      
       for (let file of files) {
         if (!file.name.endsWith('.csv')) {
-          showErrorMessage(`Fichier ignoré: ${file.name} (seuls les fichiers .csv sont acceptés)`);
+          showErrorMessage(`Fichier ignoré: ${file.name} (seuls les .csv sont acceptés)`);
           continue;
         }
         
-// Déterminer le type de fichier basé sur le nom
-let fileKey = null;
-const lowerName = file.name.toLowerCase();
+        let fileKey = null;
+        const lowerName = file.name.toLowerCase();
 
-if (lowerName === 'parts.csv') {
-  fileKey = 'parts';
-} else if (lowerName === 'part_categories.csv') {
-  fileKey = 'part_categories';
-} else if (lowerName === 'inventory_parts.csv') {
-  fileKey = 'inventory_parts';
-} else if (lowerName === 'colors.csv') {
-  fileKey = 'colors';
-} else if (lowerName === 'sets.csv') {
-  fileKey = 'sets';
-} else if (lowerName === 'inventories.csv') {  // NOUVEAU
-  fileKey = 'inventories';
-} else if (lowerName === 'minifigs.csv') {  // NOUVEAU
-  fileKey = 'minifigs';
-} else if (lowerName === 'inventory_minifigs.csv') {  // NOUVEAU
-  fileKey = 'inventory_minifigs';
-}
+        if (lowerName === 'parts.csv') fileKey = 'parts';
+        else if (lowerName === 'part_categories.csv') fileKey = 'part_categories';
+        else if (lowerName === 'inventory_parts.csv') fileKey = 'inventory_parts';
+        else if (lowerName === 'colors.csv') fileKey = 'colors';
+        else if (lowerName === 'sets.csv') fileKey = 'sets';
+        else if (lowerName === 'inventories.csv') fileKey = 'inventories';
+        else if (lowerName === 'minifigs.csv') fileKey = 'minifigs';
+        else if (lowerName === 'inventory_minifigs.csv') fileKey = 'inventory_minifigs';
         
         if (!fileKey) {
-          showErrorMessage(`Type de fichier non reconnu: ${file.name}. Noms attendus: parts.csv, part_categories.csv, inventory_parts.csv, colors.csv`);
+          showErrorMessage(`Type de fichier non reconnu: ${file.name}`);
           continue;
         }
         
@@ -254,208 +390,102 @@ if (lowerName === 'parts.csv') {
       
       await updateFileStatus();
     }
-  
-async function processFile(file, fileKey) {
-  const fileDiv = document.getElementById(`file-${fileKey}`);
-  const progressBar = document.getElementById(`progress-${fileKey}`);
-  const progressFill = document.getElementById(`progress-fill-${fileKey}`);
 
-  try {
-    fileDiv.className = 'file-item processing';
-    fileDiv.querySelector('.file-status-text').textContent = '⏳ Lecture fichier...';
-    fileDiv.querySelector('.file-status-text').className = 'file-status-text processing';
-    progressBar.style.display = 'block';
+    async function processFile(file, fileKey) {
+      const fileDiv = document.getElementById(`file-${fileKey}`);
+      const progressBar = document.getElementById(`progress-${fileKey}`);
+      const progressFill = document.getElementById(`progress-fill-${fileKey}`);
 
-    const text = await file.text();
-    if (text.length < 100) throw new Error('Fichier trop petit ou vide');
+      try {
+        fileDiv.className = 'file-item processing';
+        fileDiv.querySelector('.file-status-text').textContent = '⏳ Lecture...';
+        fileDiv.querySelector('.file-status-text').className = 'file-status-text processing';
+        progressBar.style.display = 'block';
 
-    fileDiv.querySelector('.file-status-text').textContent = '⏳ Analyse CSV...';
-    progressFill.style.width = '10%';
+        const text = await file.text();
+        if (text.length < 100) throw new Error('Fichier trop petit ou vide');
 
-    // Analyser le CSV
-    const data = await new Promise((resolve, reject) => {
-      csvWorker.onmessage = (e) => {
-        if (e.data.type === "progress") {
-          progressFill.style.width = `${10 + e.data.value * 40}%`;
-        } else if (e.data.type === "done") {
-          resolve(e.data.data);
-        }
-      };
-      csvWorker.onerror = (err) => reject(err);
-      csvWorker.postMessage({ text });
-    });
+        fileDiv.querySelector('.file-status-text').textContent = '⏳ Analyse CSV...';
+        progressFill.style.width = '10%';
 
-    if (data.length === 0) throw new Error('Aucune donnée valide trouvée');
+        const data = await new Promise((resolve, reject) => {
+          csvWorker.onmessage = (e) => {
+            if (e.data.type === "progress") {
+              progressFill.style.width = `${10 + e.data.value * 40}%`;
+            } else if (e.data.type === "done") {
+              resolve(e.data.data);
+            }
+          };
+          csvWorker.onerror = reject;
+          csvWorker.postMessage({ text });
+        });
 
-    fileDiv.querySelector('.file-status-text').textContent = '📦 Enregistrement DB...';
-    progressFill.style.width = '60%';
+        if (data.length === 0) throw new Error('Aucune donnée valide');
 
-    // Nettoyer les données selon le type
-    let cleanedData = data;
-    if (fileKey === "parts") cleanedData = window.cleanPartsData(data);
-    if (fileKey === "inventory_parts") cleanedData = window.cleanInventoryPartsData(data);
-    if (fileKey === "part_categories") cleanedData = window.cleanCategoriesData(data);
-    if (fileKey === "colors") cleanedData = window.cleanColorsData(data);
-    if (fileKey === "sets") cleanedData = window.cleanSetsData(data);
-    if (fileKey === "inventories") cleanedData = window.cleanInventoriesData(data);
-    if (fileKey === "minifigs") cleanedData = window.cleanMinifigsData(data);
-    if (fileKey === "inventory_minifigs") cleanedData = window.cleanInventoryMinifigsData(data);
+        fileDiv.querySelector('.file-status-text').textContent = '📦 Enregistrement...';
+        progressFill.style.width = '60%';
 
-    // ✅ CORRECTION : Sauvegarder cleanedData
-    await db.saveData(fileKey, cleanedData, (current, total) => {
-      const percentage = 60 + (current / total) * 40;
-      progressFill.style.width = `${percentage}%`;
-    });
+        let cleanedData = data;
+        if (fileKey === "parts") cleanedData = window.cleanPartsData(data);
+        if (fileKey === "inventory_parts") cleanedData = window.cleanInventoryPartsData(data);
+        if (fileKey === "part_categories") cleanedData = window.cleanCategoriesData(data);
+        if (fileKey === "colors") cleanedData = window.cleanColorsData(data);
+        if (fileKey === "sets") cleanedData = window.cleanSetsData(data);
+        if (fileKey === "inventories") cleanedData = window.cleanInventoriesData(data);
+        if (fileKey === "minifigs") cleanedData = window.cleanMinifigsData(data);
+        if (fileKey === "inventory_minifigs") cleanedData = window.cleanInventoryMinifigsData(data);
 
-    // Sauvegarder la date du fichier
-    await db.setFileDate(fileKey, file.lastModified);
+        await db.saveData(fileKey, cleanedData, (current, total) => {
+          const percentage = 60 + (current / total) * 40;
+          progressFill.style.width = `${percentage}%`;
+        });
 
-    progressFill.style.width = '100%';
-    setTimeout(() => {
-      fileDiv.className = 'file-item loaded';
-      fileDiv.querySelector('.file-status-text').textContent = '✅ Chargé';
-      fileDiv.querySelector('.file-status-text').className = 'file-status-text loaded';
-      progressBar.style.display = 'none';
-    }, 500);
+        await db.setFileDate(fileKey, file.lastModified);
 
-    showSuccessMessage(`${file.name} traité avec succès (${cleanedData.length.toLocaleString()} enregistrements)`);
+        progressFill.style.width = '100%';
+        setTimeout(() => {
+          fileDiv.className = 'file-item loaded';
+          fileDiv.querySelector('.file-status-text').textContent = '✅ Chargé';
+          fileDiv.querySelector('.file-status-text').className = 'file-status-text loaded';
+          progressBar.style.display = 'none';
+        }, 500);
 
-  } catch (error) {
-    console.error('Erreur traitement fichier:', error);
-    fileDiv.className = 'file-item missing';
-    fileDiv.querySelector('.file-status-text').textContent = '❌ Erreur';
-    fileDiv.querySelector('.file-status-text').className = 'file-status-text missing';
-    progressBar.style.display = 'none';
-    showErrorMessage(`Erreur avec ${file.name}: ${error.message}`);
-  }
-}
+        showSuccessMessage(`${file.name}: ${cleanedData.length.toLocaleString()} enregistrements`);
 
-    // Supprimer un fichier
+      } catch (error) {
+        console.error('Erreur:', error);
+        fileDiv.className = 'file-item missing';
+        fileDiv.querySelector('.file-status-text').textContent = '❌ Erreur';
+        fileDiv.querySelector('.file-status-text').className = 'file-status-text missing';
+        progressBar.style.display = 'none';
+        showErrorMessage(`Erreur avec ${file.name}: ${error.message}`);
+      }
+    }
+
     async function removeFile(fileKey) {
-      if (confirm(`Êtes-vous sûr de vouloir supprimer les données ${REQUIRED_FILES[fileKey].name} ?`)) {
+      if (confirm(`Supprimer ${REQUIRED_FILES[fileKey].name} ?`)) {
         const transaction = db.db.transaction([fileKey, 'metadata'], 'readwrite');
         await transaction.objectStore(fileKey).clear();
         await transaction.objectStore('metadata').delete(`${fileKey}_last_update`);
-        await transaction.objectStore('metadata').delete(`${fileKey}_file_date`); // Nouveau
+        await transaction.objectStore('metadata').delete(`${fileKey}_file_date`);
         await transaction.objectStore('metadata').delete(`${fileKey}_count`);
         
         await updateFileStatus();
-        showInfoMessage(`Données ${REQUIRED_FILES[fileKey].name} supprimées.`);
+        showInfoMessage(`${REQUIRED_FILES[fileKey].name} supprimé.`);
       }
     }
 
-// Vérifier les mises à jour disponibles sur Rebrickable
-async function checkForUpdates() {
-  showInfoMessage('Vérification des mises à jour en cours...');
-  
-  try {
-    // Récupérer les dates des fichiers en ligne
-    const onlineDates = await getOnlineFileDates();
-    let statusMessage = 'État des fichiers :<br>';
-    let hasUpdates = false;
-    
-    for (const fileKey of Object.keys(REQUIRED_FILES)) {
-      const file = REQUIRED_FILES[fileKey];
-      const localDate = await db.getFileDate(fileKey);
-      const onlineDate = onlineDates[fileKey];
-      const count = await db.getTableCount(fileKey);
-      
-      const fileDiv = document.getElementById(`file-${fileKey}`);
-      
-      if (onlineDate && localDate) {
-        const localDateObj = new Date(localDate);
-        const onlineDateObj = new Date(onlineDate);
-        const isOutdated = onlineDateObj > localDateObj;
-        
-        if (isOutdated) {
-          hasUpdates = true;
-          fileDiv.classList.add('update-available');
-          
-          // Ajouter le bouton de mise à jour
-          const updateButton = document.createElement('button');
-          updateButton.className = 'download-link update-button';
-          updateButton.innerHTML = '🔄 Mettre à jour';
-          updateButton.onclick = () => downloadAndUpdateFile(fileKey);
-          fileDiv.appendChild(updateButton);
-        } else {
-          fileDiv.classList.remove('update-available');
-        }
-        
-        statusMessage += `• ${file.name}: ${isOutdated ? '⚠️ Mise à jour disponible' : '✅ À jour'} (local: ${localDateObj.toLocaleDateString()}, en ligne: ${onlineDateObj.toLocaleDateString()})<br>`;
-      } else if (localDate) {
-        statusMessage += `• ${file.name}: ✅ Données locales présentes (${new Date(localDate).toLocaleDateString()})<br>`;
-      } else {
-        statusMessage += `• ${file.name}: ❌ Données manquantes<br>`;
-      }
+    async function checkForUpdates() {
+      showInfoMessage('Les fichiers Rebrickable sont mis à jour quotidiennement. Utilisez "📥 Télécharger depuis Rebrickable" pour obtenir la dernière version.');
     }
-    
-    if (hasUpdates) {
-      statusMessage += '<br>🔄 Des mises à jour sont disponibles. Cliquez sur "Mettre à jour" pour chaque fichier.';
-    } else {
-      statusMessage += '<br>✅ Tous les fichiers sont à jour.';
-    }
-    
-    showInfoMessage(statusMessage);
-  } catch (error) {
-    console.error('Erreur lors de la vérification des mises à jour:', error);
-    showErrorMessage('Impossible de vérifier les mises à jour: ' + error.message);
-  }
-}
 
-// Télécharger et mettre à jour un fichier
-async function downloadAndUpdateFile(fileKey) {
-  const file = REQUIRED_FILES[fileKey];
-  showInfoMessage(`Téléchargement de ${file.name} en cours...`);
-  
-  try {
-    const response = await fetch(file.url);
-    if (!response.ok) throw new Error('Erreur de téléchargement: ' + response.status);
-    
-    // Dans un environnement réel, il faudrait décompresser le fichier .gz
-    // Pour cette démo, nous allons simplement simuler le traitement
-    showInfoMessage(`Le fichier ${file.name} a été téléchargé. Veuillez le décompresser et l'importer manuellement.`);
-    
-  } catch (error) {
-    console.error('Erreur lors du téléchargement:', error);
-    showErrorMessage('Erreur de téléchargement: ' + error.message);
-  }
-}
-
-// Obtenir les dates des fichiers en ligne (simulation)
-async function getOnlineFileDates() {
-  // En réalité, il faudrait faire une requête HEAD pour obtenir les dernières modifications
-  // Pour cette démo, nous allons simuler des dates aléatoires
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const dates = {};
-      const now = Date.now();
-      const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000);
-      
-      for (const fileKey of Object.keys(REQUIRED_FILES)) {
-        // 30% de chance que le fichier en ligne soit plus récent
-        const isNewer = Math.random() < 0.3;
-        const localDate = db.getFileDate(fileKey);
-        
-        if (localDate && isNewer) {
-          dates[fileKey] = new Date(localDate).getTime() + (2 * 24 * 60 * 60 * 1000);
-        } else {
-          dates[fileKey] = sevenDaysAgo + Math.random() * (now - sevenDaysAgo);
-        }
-      }
-      
-      resolve(dates);
-    }, 1000);
-  });
-}
-
-    // Effacer toutes les données
     async function clearAllData() {
-      if (confirm('Êtes-vous sûr de vouloir effacer toutes les données stockées ? Cette action est irréversible.')) {
+      if (confirm('Effacer TOUTES les données ? Cette action est irréversible.')) {
         try {
           await resetDatabase();
           location.reload();
         } catch (error) {
-          showErrorMessage(`Erreur lors de la suppression: ${error.message}`);
+          showErrorMessage(`Erreur: ${error.message}`);
         }
       }
     }
@@ -463,35 +493,12 @@ async function getOnlineFileDates() {
     async function resetDatabase() {
       return new Promise((resolve, reject) => {
         const req = indexedDB.deleteDatabase("LegoPartsDB");
-        req.onsuccess = () => {
-          console.log("IndexedDB supprimée.");
-          resolve();
-        };
-        req.onerror = (e) => {
-          console.error("Erreur suppression IndexedDB", e);
-          reject(e);
-        };
-        req.onblocked = () => {
-          console.warn("Suppression IndexedDB bloquée (page encore ouverte ailleurs)");
-        };
+        req.onsuccess = () => resolve();
+        req.onerror = reject;
       });
     }
-        // Afficher un message d'erreur dans l'app
-    function showErrorInApp(message) {
-      document.getElementById('app').innerHTML = `
-        <div class="error">
-          <h3>Erreur</h3>
-          <p>${message}</p>
-          <button class="btn" onclick="backToFileManager()">Retour à la gestion des fichiers</button>
-        </div>
-      `;
-    }
 
-// Utiliser les fonctions du fichier mutualisé
-
-    // Fonction modifiée pour rediriger vers app.html
     async function launchApp() {
-      // Vérifier que tous les fichiers sont chargés
       const allFilesLoaded = await checkAllFilesLoaded();
       if (allFilesLoaded) {
         navigateTo('menu.html');
@@ -507,17 +514,47 @@ async function getOnlineFileDates() {
       }
       return true;
     }
+
+    function showErrorMessage(message) {
+      showMessage(message, 'error');
+    }
+
+    function showInfoMessage(message) {
+      showMessage(message, 'info');
+    }
+
+    function showSuccessMessage(message) {
+      showMessage(message, 'success');
+    }
+
+    function showMessage(message, type) {
+      const oldMessages = document.querySelectorAll('.temp-message');
+      oldMessages.forEach(msg => msg.remove());
+      
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `temp-message ${type === 'success' ? 'success' : type === 'error' ? 'error' : 'update-section'}`;
+      messageDiv.innerHTML = `<p>${message}</p>`;
+      
+      document.body.insertBefore(messageDiv, document.body.firstChild);
+      
+      setTimeout(() => {
+        if (messageDiv.parentNode) {
+          messageDiv.remove();
+        }
+      }, 8000);
+    }
   </script>
+
   <!-- SERVICE WORKER -->
-<script>
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js')
-      .then(reg => console.log('✅ Service Worker enregistré', reg.scope))
-      .catch(err => console.error('❌ Erreur Service Worker:', err));
-  });
-}
-</script>
-<script src="./install-prompt.js"></script>
+  <script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js')
+        .then(reg => console.log('✅ Service Worker enregistré', reg.scope))
+        .catch(err => console.error('❌ Erreur Service Worker:', err));
+    });
+  }
+  </script>
+  <script src="./install-prompt.js"></script>
 </body>
 </html>

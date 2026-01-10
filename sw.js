@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lego-manager-v1.1'; // ⬅️ Changez la version !
+const CACHE_NAME = 'lego-manager-v1.2'; // ⬅️ Changez la version !
 const BASE_PATH = '/lego-manager'; // ⬅️ Remplacez par votre repo
 
 const urlsToCache = [
@@ -15,7 +15,35 @@ const urlsToCache = [
   `${BASE_PATH}/auth.js`,
   `${BASE_PATH}/category-images.json`,
   `${BASE_PATH}/analysis-worker.js`
+  `${BASE_PATH}/gz-decompressor.js`
 ];
+
+// Ne PAS cacher les fichiers .gz de Rebrickable
+self.addEventListener('fetch', event => {
+  const url = event.request.url;
+  
+  // Ne pas intercepter les requêtes vers Rebrickable
+  if (url.includes('rebrickable.com') || url.includes('cdnjs.cloudflare.com')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+  
+  event.respondWith(
+    fetch(event.request)
+      .then(response => {
+        const responseClone = response.clone();
+        
+        caches.open(CACHE_NAME).then(cache => {
+          cache.put(event.request, responseClone);
+        });
+        
+        return response;
+      })
+      .catch(() => {
+        return caches.match(event.request);
+      })
+  );
+});
 
 // Installation du Service Worker
 self.addEventListener('install', event => {
