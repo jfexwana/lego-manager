@@ -1,0 +1,25 @@
+{
+  "name": "LEGO Manager - Gestionnaire de Collection",
+  "short_name": "LEGO Manager",
+  "description": "Gérez votre collection LEGO : inventaire en vrac, sets, pièces manquantes",
+  "start_url": "/lego-manager/menu.html",
+  "scope": "/lego-manager/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#d32f2f",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/lego-manager/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/lego-manager/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

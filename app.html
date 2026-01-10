@@ -1,0 +1,2914 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <!-- META TAGS PWA - À ajouter juste après <meta charset="UTF-8"> -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LEGO Manager">
+<meta name="theme-color" content="#d32f2f">
+
+<!-- PWA MANIFEST -->
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="./icon-192.png">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tri Pièces LEGO (Bulk Mode - IndexedDB)</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./styles.css">
+<script>
+// Détection automatique du chemin de base
+const BASE_PATH = window.location.pathname.includes('/lego-manager/') 
+  ? '/lego-manager' 
+  : '';
+
+function navigateTo(page) {
+  window.location.href = `${BASE_PATH}/${page}`;
+}
+</script>
+</head>
+<body>
+  <div class="container">
+    <div id="app">
+      <div class="loading">Initialisation de l'application...</div>
+    </div>
+  </div>
+
+  <script src="./lego-db.js"></script>
+  <script src="./unified-data-manager.js"></script>
+  <script src="./debug.js"></script>
+  <script src="./keywords.js" defer></script>
+
+  <script>
+    // Cache d'images
+    let personalInventory = null;
+    let allParts = [];
+    let filteredParts = [];
+    let currentCategory = null;
+    let currentPage = 1;
+    let totalPages = 1;
+    let activeFilters = [];
+    let printFilter = 'no-print';
+    let temporaryFilters = []; // Filtres de recherche temporaires
+    let globalSearchResults = null; // Résultats de recherche globale
+    let csvWorker = null;
+    let unifiedDataManager = null;  // NOUVEAU
+
+    // NOUVEAU : Système de file d'attente pour le chargement des images
+if (!window.setImageLoadQueue) {
+  window.setImageLoadQueue = [];
+  window.setImageLoadInProgress = false;
+}
+
+// Cache d'images
+let db = null;
+
+// Créer ou réutiliser le cache d'images des sets
+if (!window.setImageCache) {
+  window.setImageCache = new Map();
+}
+
+    // Initialisation de l'application
+    window.onload = async function() {
+      debug('Initialisation de l\'application...');
+      
+      try {
+        // Initialiser la base de données
+          db = new LegoDatabase();
+          await db.initializeComplete(); // Nouvelle méthode
+        
+          // NOUVEAU : Initialiser le gestionnaire de données unifié
+        unifiedDataManager = new UnifiedDataManager();
+        await unifiedDataManager.loadUnifiedData();    
+
+            // NOUVEAU : Charger le cache d'analyse depuis IndexedDB
+    await unifiedDataManager.loadAnalysisCache();
+
+        // Initialiser l'inventaire personnel
+        personalInventory = new PersonalInventoryV2(unifiedDataManager);
+
+        // Vérifier que les données sont présentes
+        const allFilesLoaded = await checkAllFilesLoaded();
+        if (!allFilesLoaded) {
+          showErrorInApp('Données manquantes. Veuillez retourner à la page d\'import pour charger les fichiers CSV.');
+          return;
+        }
+        
+        // Charger les données sauvegardées
+        
+        debug('Application initialisée avec succès');
+        // Initialiser le gestionnaire de boutons sécurisé
+        if (window.secureButtonManager) {
+        window.secureButtonManager.initialize();
+        }
+        await initializeApp();
+      } catch (error) {
+        console.error('Erreur d\'initialisation:', error);
+        showErrorInApp(`Erreur d'initialisation: ${error.message}`);
+      }
+    };
+
+    async function checkAllFilesLoaded() {
+      for (const fileKey of Object.keys(REQUIRED_FILES)) {
+        const count = await db.getTableCount(fileKey);
+        if (count === 0) return false;
+      }
+      return true;
+    }
+
+    // Initialiser l'application
+async function initializeApp() {
+  if (unifiedDataManager && unifiedDataManager.sets) {
+    await Promise.all(
+      unifiedDataManager.sets.map(s => setManager.completePartsInfo(s))
+    );
+  }
+  initPartClickHandlers();
+  await showCategories();
+}
+
+// Ajouter cette fonction après initializeApp()
+function initPartClickHandlers() {
+  document.addEventListener('click', (e) => {
+    // Gérer les clics normaux
+    const partContainer = e.target.closest('.part-image-container');
+    if (partContainer) {
+      const partNum = partContainer.dataset.partNum;
+      const partName = partContainer.dataset.partName;
+      const categoryName = partContainer.dataset.categoryName;
+      handlePartClickSafe(partNum, partName, categoryName, partContainer);
+      return;
+    }
+    
+    // Gérer les clics dans les recherches globales
+    const globalPartContainer = e.target.closest('.global-part-image-container');
+    if (globalPartContainer) {
+      const partNum = globalPartContainer.dataset.partNum;
+      const partName = globalPartContainer.dataset.partName;
+      const categoryName = globalPartContainer.dataset.categoryName;
+      handlePartClickSafe(partNum, partName, categoryName, globalPartContainer);
+      return;
+    }
+  });
+}
+
+// Nouvelle fonction handlePartClick sécurisée
+function handlePartClickSafe(partNum, partName, categoryName, partContainer) {
+  debugGroup('🖱️ handlePartClickSafe');
+  debug('📦 Part:', partNum, partName);
+  debug('📁 Category:', categoryName);
+  
+  const partDiv = partContainer.closest('.part-card');
+  const colorsData = partDiv.getAttribute('data-colors');
+  
+  debug('🎨 Colors data:', colorsData ? 'présent' : 'absent');
+  
+  if (!colorsData) {
+    console.warn('❌ Pas de données de couleur');
+    debugGroupEnd();
+    return;
+  }
+  
+  const colors = JSON.parse(colorsData);
+  debug('🎨 Couleurs parsées:', colors.length, 'couleurs');
+  
+  if (colors.length === 0) {
+    alert('Aucune couleur disponible pour cette pièce');
+    debugGroupEnd();
+    return;
+  }
+  
+  if (colors.length === 1) {
+    debug('ℹ️ Une seule couleur - pas de popup');
+    debugGroupEnd();
+    return;
+  }
+  
+  // Plusieurs couleurs, afficher le popup
+  debug('✅ Affichage du popup avec', colors.length, 'couleurs');
+  showColorPopup({part_num: partNum, name: partName}, categoryName, colors);
+  
+  debugGroupEnd();
+}
+
+// Afficher un message d'erreur dans l'app
+    function showErrorInApp(message) {
+      document.getElementById('app').innerHTML = `
+        <div class="error">
+          <h3>Erreur</h3>
+          <p>${message}</p>
+          <button class="btn" onclick="backToFileManager()">Retour à la gestion des fichiers</button>
+        </div>
+      `;
+    }
+
+    // Obtenir les catégories depuis IndexedDB
+    async function getLocalCategories() {
+  try {
+    const categories = await db.getData('part_categories');
+    const categoriesWithCounts = [];
+    
+    for (const cat of categories) {
+      // Utiliser d'abord les métadonnées, puis la fonction en fallback
+      let partCount = await db.getMetadata(`category_${cat.id}_count`);
+      if (!partCount) {
+        partCount = await getPartCountForCategory(cat.id);
+      }
+      
+      const setCount = await db.getMetadata(`category_${cat.id}_set_count`) || 0;
+      
+      if (partCount > 0) {
+        categoriesWithCounts.push({
+          id: cat.id,
+          name: cat.name,
+          num_parts: partCount,
+          num_sets: setCount, // Nouveau
+          keywords: generateKeywordsForCategory(cat.id)
+        });
+      }
+    }
+    
+    // Trier par nombre de sets d'abord, puis par nombre de pièces
+    return categoriesWithCounts.sort((a, b) => {
+      if (b.num_sets !== a.num_sets) {
+        return b.num_sets - a.num_sets;
+      }
+      return b.num_parts - a.num_parts;
+    });
+  } catch (error) {
+    console.error('Erreur lors du chargement des catégories:', error);
+    return [];
+  }
+}
+
+    // Compter les pièces dans une catégorie
+    async function getPartCountForCategory(categoryId) {
+      try {
+        const parts = await db.getDataByIndex('parts', 'part_cat_id', categoryId);
+        return parts.length;
+      } catch (error) {
+        console.error(`Erreur lors du comptage des pièces pour la catégorie ${categoryId}:`, error);
+        return 0;
+      }
+    }
+
+// Générer des mots-clés pour une catégorie
+function generateKeywordsForCategory(categoryId) {
+  return window.PREDEFINED_KEYWORDS 
+    ? (window.PREDEFINED_KEYWORDS[categoryId] || [])
+    : [];
+}
+    // Obtenir les pièces d'une catégorie depuis IndexedDB
+async function getLocalPartsByCategory(categoryId) {
+  try {
+    const parts = await db.getDataByIndex('parts', 'part_cat_id', categoryId);
+    
+    // Charger le mapping inventory→set
+    const inventories = await db.getData('inventories');
+    const invMap = new Map(inventories.map(inv => [inv.id, inv.set_num]));
+    
+    const partsWithSetCount = await Promise.all(
+      parts.map(async (part) => {
+        const inventoryParts = await db.getDataByIndex('inventory_parts', 'part_num', part.part_num);
+        
+        // Compter les VRAIS sets (pas les inventory_id)
+        const realSets = new Set();
+        inventoryParts.forEach(ip => {
+          const setNum = invMap.get(ip.inventory_id);
+          if (setNum) realSets.add(setNum);
+        });
+        
+        return {
+          ...part,
+          set_count: realSets.size
+        };
+      })
+    );
+    
+    return partsWithSetCount.sort((a, b) => b.set_count - a.set_count);
+  } catch (error) {
+    console.error('Erreur chargement pièces:', error);
+    return [];
+  }
+}
+
+// Obtenir les couleurs disponibles pour une pièce
+async function getPartColors(partNum) {
+  try {
+    // Récupérer toutes les entrées inventory_parts pour cette pièce
+    const inventoryParts = await db.getDataByIndex('inventory_parts', 'part_num', partNum);
+    
+    if (inventoryParts.length === 0) {
+      return [{
+        id: 0,
+        name: 'Noir',
+        img_url: `https://cdn.rebrickable.com/media/parts/elements/${partNum}.jpg`
+      }];
+    }
+    
+    // Extraire les color_id uniques (INCLURE le 0)
+    const colorIds = [...new Set(inventoryParts.map(item => item.color_id))].filter(id => 
+      id !== null && id !== undefined && id !== '' // Ne pas filtrer le 0
+    );
+    
+    // Récupérer les informations de couleur depuis la table colors
+    const allColors = await db.getData('colors');
+    const colorMap = new Map();
+    
+    allColors.forEach(color => {
+      colorMap.set(color.id, color);
+    });
+    
+    // Construire le résultat avec les URLs d'images
+    const colors = [];
+    for (const colorId of colorIds) {
+      const colorInfo = colorMap.get(colorId);
+      
+      // Trouver une URL d'image pour cette combinaison part_num + color_id
+      const inventoryItem = inventoryParts.find(item => item.color_id === colorId);
+      
+      if (colorInfo) {
+        colors.push({
+          id: colorId,
+          name: colorInfo.name,
+          img_url: inventoryItem?.img_url || `https://cdn.rebrickable.com/media/parts/elements/${partNum}.jpg`
+        });
+      } else if (colorId === 0) {
+        // Cas spécial pour la couleur 0 (Noir) si non trouvée dans colors.csv
+        colors.push({
+          id: 0,
+          name: 'Noir',
+          img_url: inventoryItem?.img_url || `https://cdn.rebrickable.com/media/parts/elements/${partNum}.jpg`
+        });
+      }
+    }
+    
+    // Si aucune couleur trouvée, retourner la couleur standard
+    return colors.length > 0 ? colors : [{
+      id: 0,
+      name: 'Noir',
+      img_url: inventoryParts[0]?.img_url || `https://cdn.rebrickable.com/media/parts/elements/${partNum}.jpg`
+    }];
+  } catch (error) {
+    console.error(`Erreur récupération couleurs pour ${partNum}:`, error);
+    return [{
+      id: 0,
+      name: 'Noir',
+      img_url: `https://cdn.rebrickable.com/media/parts/elements/${partNum}.jpg`
+    }];
+  }
+}
+
+    // Obtenir l'URL de l'image d'une pièce
+async function getPartImageUrl(part) {
+  if (!part || !part.part_num) {
+    return 'https://via.placeholder.com/100x100?text=No+Image';
+  }
+  
+  // Vérifier le cache d'abord
+  const cacheKey = `part_${part.part_num}`;
+  if (imageCache.has(cacheKey)) {
+    return imageCache.get(cacheKey);
+  }
+
+  try {
+    const inventoryParts = await db.getDataByIndex('inventory_parts', 'part_num', part.part_num);
+    let imageUrl;
+    
+    if (inventoryParts.length > 0 && inventoryParts[0].img_url) {
+      imageUrl = inventoryParts[0].img_url;
+      
+      // Tester si l'image fonctionne
+      //const isValid = await testImageUrl(imageUrl);
+      //if (!isValid) {
+      //  console.warn(`Image cassée pour ${part.part_num}`);
+      //  imageUrl = `https://cdn.rebrickable.com/media/parts/elements/${part.part_num}.jpg`;
+      //}
+    } else {
+      imageUrl = `https://cdn.rebrickable.com/media/parts/elements/${part.part_num}.jpg`;
+    }
+    
+    // Mettre en cache
+    imageCache.set(cacheKey, imageUrl);
+    return imageUrl;
+  } catch (error) {
+    console.warn(`Erreur lors de la recherche d'image pour ${part.part_num}:`, error);
+    const fallbackUrl = `https://cdn.rebrickable.com/media/parts/elements/${part.part_num}.jpg`;
+    imageCache.set(cacheKey, fallbackUrl);
+    return fallbackUrl;
+  }
+}
+
+// Fonction pour vérifier si une pièce manque dans un set (CORRIGÉE)
+async function checkIfPartIsMissingInSets(partNum, colorId) {
+  try {
+    if (!unifiedDataManager || !unifiedDataManager.currentData.sets) return false;
+    
+    const missingSets = [];
+    
+    for (const set of unifiedDataManager.currentData.sets) {
+      if (set.parts && Array.isArray(set.parts)) {
+        for (const part of set.parts) {
+          // Utiliser la structure unifiée : part_num, color_id, quantity, quantity_owned
+          if (part.part_num === partNum && part.color_id == colorId) {
+            const quantityOwned = part.quantity_owned || 0;
+            if (quantityOwned < part.quantity) {
+              missingSets.push({
+                setNumber: set.number,
+                setName: set.name,
+                missingCount: part.quantity - quantityOwned
+              });
+            }
+          }
+        }
+      }
+    }
+    
+    return missingSets.length > 0 ? missingSets : false;
+  } catch (error) {
+    console.error('Erreur vérification pièces manquantes:', error);
+    return false;
+  }
+}
+
+
+// Modifier la fonction changeQuantity pour utiliser color_id
+// Dans app.html, modifier la fonction changeQuantity :
+async function changeQuantity(partNum, partName, categoryName, colorId, colorName, delta) {
+  debugGroup('🔧 changeQuantity appelé');
+  debug('📦 Paramètres:', { partNum, colorId, colorName, delta, categoryName });
+  
+  const currentQty = unifiedDataManager.getInventoryQuantity(partNum, colorId);
+  debug('📊 Quantité actuelle:', currentQty);
+  
+  const newQty = Math.max(0, currentQty + delta);
+  debug('🎯 Nouvelle quantité:', newQty);
+  
+  // Utiliser directement le gestionnaire unifié
+  unifiedDataManager.updateInventory(partNum, colorId, colorName, newQty, categoryName);
+  debug('💾 Inventaire mis à jour dans unifiedDataManager');
+  
+  await unifiedDataManager.saveUnifiedData();
+  debug('✅ Données sauvegardées');
+  
+  // Vérifier si cette pièce manque dans un set
+  if (delta > 0) {
+    const missingSets = await checkIfPartIsMissingInSets(partNum, colorId);
+    if (missingSets && missingSets.length > 0) {
+      const setsList = missingSets.map(s => `${s.setNumber} (${s.missingCount} manquant${s.missingCount > 1 ? 's' : ''})`).join(', ');
+      showToast(`Pièce manquante dans le${missingSets.length > 1 ? 's' : ''} set${missingSets.length > 1 ? 's' : ''}: ${setsList}. Vérifiez Mon inventaire`, 'warning', 6000);
+    }
+  }
+  
+  // Mettre à jour l'affichage de la quantité - TOUS LES ÉLÉMENTS
+  const qtyElements = document.querySelectorAll(`#qty_${partNum}_${colorId}, #global_qty_${partNum}_${colorId}`);
+  debug(`🔍 Trouvé ${qtyElements.length} éléments de quantité à mettre à jour`);
+  
+  qtyElements.forEach((el, index) => {
+    if (el) {
+      debug(`  ↳ Mise à jour élément ${index + 1}:`, el.id);
+      el.textContent = newQty;
+      // Animation de feedback visuel
+      el.style.backgroundColor = '#4caf50';
+      el.style.color = 'white';
+      el.style.transition = 'all 0.3s ease';
+      
+      setTimeout(() => {
+        el.style.backgroundColor = '';
+        el.style.color = '';
+      }, 500);
+    }
+  });
+  
+  // METTRE À JOUR LES BOUTONS DANS LES DEUX CONTEXTES
+  updateAllButtonsForPart(partNum, colorId, newQty);
+  
+  debugGroupEnd();
+}
+
+// NOUVELLE FONCTION pour mettre à jour tous les boutons
+function updateAllButtonsForPart(partNum, colorId, currentQty) {
+  debugGroup('🔘 updateAllButtonsForPart');
+  debug('📦 Part:', partNum, 'Color:', colorId, 'Qty:', currentQty);
+
+    // Vérifier d'abord la quantité RÉELLE dans unifiedDataManager
+  const realQty = window.unifiedDataManager?.getInventoryQuantity(partNum, colorId) || currentQty;
+  debug('🔍 Quantité vérifiée depuis unifiedDataManager:', realQty);
+  
+  if (realQty !== currentQty) {
+    console.warn('⚠️ ATTENTION: Différence entre currentQty et realQty!');
+    console.warn(`  Expected: ${currentQty}, Got: ${realQty}`);
+    currentQty = realQty; // Utiliser la vraie quantité
+  }
+  
+  // Trouver TOUS les boutons de décrémentation pour cette pièce
+  const decrementButtons = document.querySelectorAll(
+    `button[data-action="decrement"][data-part-num="${partNum}"][data-color-id="${colorId}"]`
+  );
+  
+  debug(`🔍 Trouvé ${decrementButtons.length} bouton(s) de décrémentation`);
+  
+  decrementButtons.forEach((btn, index) => {
+    const wasDisabled = btn.disabled;
+    btn.disabled = currentQty <= 0;
+    
+    // Changer le style visuel
+    if (currentQty <= 0) {
+      btn.style.opacity = '0.5';
+      btn.style.cursor = 'not-allowed';
+      btn.style.backgroundColor = '#ccc';
+    } else {
+      btn.style.opacity = '1';
+      btn.style.cursor = 'pointer';
+      btn.style.backgroundColor = '#f44336'; // ROUGE
+    }
+    
+    debug(`  ↳ Bouton ${index + 1}: ${wasDisabled ? 'disabled' : 'enabled'} → ${btn.disabled ? 'disabled' : 'enabled'}`);
+  });
+  
+  // Faire pareil pour les boutons d'incrémentation
+  const incrementButtons = document.querySelectorAll(
+    `button[data-action="increment"][data-part-num="${partNum}"][data-color-id="${colorId}"]`
+  );
+  
+  debug(`🔍 Trouvé ${incrementButtons.length} bouton(s) d'incrémentation`);
+  
+  incrementButtons.forEach((btn, index) => {
+    btn.style.backgroundColor = '#4caf50'; // VERT
+    btn.style.color = 'white';
+    debug(`  ↳ Bouton + ${index + 1}: style appliqué (vert)`);
+  });
+  
+  debugGroupEnd();
+}
+
+// Fonction pour échapper les caractères HTML (IMPORTANT)
+function escapeHTML(str) {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Fonction pour afficher des notifications toast
+function showToast(message, type = 'info', duration = 3000) {
+  // Créer un élément toast si nécessaire
+  let toastContainer = document.querySelector('.toast-container');
+  if (!toastContainer) {
+    toastContainer = document.createElement('div');
+    toastContainer.className = 'toast-container';
+    document.body.appendChild(toastContainer);
+  }
+  
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `
+    <div class="toast-content">${message}</div>
+  `;
+  
+  toastContainer.appendChild(toast);
+  
+  // Afficher le toast
+  setTimeout(() => {
+    toast.classList.add('show');
+  }, 100);
+  
+  // Cacher après la durée spécifiée
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => {
+      toast.remove();
+    }, 300);
+  }, duration);
+}
+
+    // Obtenir 3 images d'exemple pour une catégorie
+// Obtenir 3 images d'exemple pour une catégorie
+let categoryImagesCache = null;
+
+async function getCategoryExampleImages(categoryId) {
+  if (!categoryImagesCache) {
+    try {
+      const response = await fetch('category-images.json');
+      categoryImagesCache = await response.json();
+    } catch (error) {
+      debug('Erreur chargement category-images.json:', error);
+      categoryImagesCache = {};
+    }
+  }
+  
+  const imageUrls = categoryImagesCache[categoryId] || [];
+  
+  return imageUrls.slice(0, 3).map((url, index) => ({
+    url: url,
+    name: `Pièce exemple ${index + 1}`,
+    part_num: `example_${categoryId}_${index + 1}`
+  }));
+}
+ 
+   // Filtrer les pièces selon les mots-clés actifs et le filtre print
+function filterParts(parts, filters, printFilterValue) {
+  let filtered = parts;
+  const keywords = ['print', 'logo', 'pattern', 'label', 'sticker', 'poster', 'writing', 'graffiti'];
+
+  if (printFilterValue === 'print' || printFilterValue === 'sticker') {
+    filtered = filtered.filter(part => {
+      const partName = (part.name || '').toLowerCase();
+      return keywords.some(keyword => partName.includes(keyword));
+    });
+  } else if (printFilterValue === 'no-print') {
+    filtered = filtered.filter(part => {
+      const partName = (part.name || '').toLowerCase();
+      return !keywords.some(keyword => partName.includes(keyword));
+    });
+  }
+
+  if (filters.length === 0) return filtered;
+
+  return filtered.filter(part => {
+    const searchText = ((part.name || '') + ' ' + (part.part_num || '')).toLowerCase();
+    return filters.every(filter =>
+      searchText.includes(filter.toLowerCase())
+    );
+  });
+}
+
+    // Afficher les catégories
+    async function showCategories() {
+      const app = document.getElementById('app');
+      
+      app.innerHTML = `
+        <div class="update-section">
+          <h3>Données IndexedDB</h3>
+          <p>Données stockées localement dans votre navigateur</p>
+          <button class="btn btn-warning" onclick="goToMainMenu()">Retour au menu</button>
+          <button class="btn" onclick="showPersonalInventory()">📦 Mon Inventaire</button>
+        </div>
+
+<div style="background: #f0f8ff; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #2196f3;">
+  <h3>Recherche globale dans les catégories</h3>
+  <div style="display: flex; gap: 10px; align-items: center;">
+    <input type="text" id="global-search" placeholder="Recherche par mots-clés (ex: brick AND red, slope OR curved, NOT print)" 
+           style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 1em;">
+    <button onclick="executeGlobalSearch()" style="background: #2196f3; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; white-space: nowrap;">
+      Rechercher
+    </button>
+  </div>
+  <div style="margin-top: 10px; font-size: 0.9em; color: #666;">
+    <strong>Opérateurs :</strong> AND, OR, NOT - Utilisez des guillemets pour les phrases exactes "brick 2x4"
+  </div>
+  
+  <!-- Zone des filtres temporaires globaux -->
+  <div id="global-temporary-filters" style="margin-top: 15px;"></div>
+</div>
+    </div>
+
+        <h2>Choisissez une catégorie de pièces :</h2>
+        <div class="loading">Chargement des catégories...</div>
+        <div class="grid" id="categories-grid" style="display: none;"></div>
+      `;
+
+      try {
+        const categories = await getLocalCategories();
+        const grid = document.getElementById('categories-grid');
+
+        if (categories.length === 0) {
+          app.innerHTML = `
+            <div class="error">
+              <h3>Aucune catégorie trouvée</h3>
+              <p>Vérifiez que les fichiers CSV sont bien chargés dans IndexedDB.</p>
+              <button class="btn" onclick="backToFileManager()">Retour à la gestion des fichiers</button>
+            </div>
+          `;
+          return;
+        }
+
+        for (const cat of categories) {
+  const categoryDiv = document.createElement('div');
+  categoryDiv.className = 'category-card';
+  categoryDiv.onclick = () => selectCategory(cat.id, cat.name);
+
+  // D'abord créer la structure de base
+  categoryDiv.innerHTML = `
+    <div class="category-title">${cat.name}</div>
+    <div class="category-count">${cat.num_parts} pièces</div>
+    <div style="display: flex; gap: 5px; justify-content: center; margin-top: 10px;" id="images-${cat.id}">
+      <div style="width: 60px; height: 60px; background: #f0f0f0; border: 1px solid #ddd; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.8em;">...</div>
+      <div style="width: 60px; height: 60px; background: #f0f0f0; border: 1px solid #ddd; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.8em;">...</div>
+      <div style="width: 60px; height: 60px; background: #f0f0f0; border: 1px solid #ddd; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.8em;">...</div>
+    </div>
+  `;
+
+  grid.appendChild(categoryDiv);
+  
+  // Charger les images de façon asynchrone
+  getCategoryExampleImages(cat.id).then(images => {
+    const imagesContainer = document.getElementById(`images-${cat.id}`);
+    if (imagesContainer) {
+      imagesContainer.innerHTML = images.map(img => `
+        <img src="${img.url}" alt="${img.name}" 
+             style="width: 60px; height: 60px; object-fit: contain; border: 1px solid #ddd; border-radius: 3px;"
+             onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjYwIiBoZWlnaHQ9IjYwIiBmaWxsPSIjRjVGNUY1Ii8+CjxyZWN0IHg9IjEiIHk9IjEiIHdpZHRoPSI1OCIgaGVpZ2h0PSI1OCIgc3Ryb2tlPSIjREREIi8+Cjx0ZXh0IHg9IjMwIiB5PSIzNSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOTk5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5ObyBJbWFnZTwvdGV4dD4KPHN2Zz4K'" 
+             title="${img.name}">
+      `).join('');
+    }
+  }).catch(error => {
+    console.error(`Erreur chargement images pour catégorie ${cat.id}:`, error);
+  });
+}
+
+        document.querySelector('.loading').style.display = 'none';
+        grid.style.display = 'grid';
+      } catch (error) {
+        console.error('Erreur affichage catégories:', error);
+        app.innerHTML = `
+          <div class="error">
+            <h3>Erreur lors du chargement des catégories</h3>
+            <p>${error.message}</p>
+            <button class="btn" onclick="backToFileManager()">Retour à la gestion des fichiers</button>
+          </div>
+        `;
+      }
+    }
+
+    // Sélectionner une catégorie
+    async function selectCategory(categoryId, categoryName) {
+      currentCategory = { id: categoryId, name: categoryName };
+      activeFilters = [];
+      printFilter = 'no-print';
+      currentPage = 1;
+
+      const app = document.getElementById('app');
+      app.innerHTML = '<div class="loading">Chargement des pièces...</div>';
+
+      try {
+        await loadCategoryParts();
+      } catch (error) {
+        app.innerHTML = `<div class="error">Erreur lors du chargement : ${error.message}</div>`;
+      }
+    }
+
+        // Charger les pièces d'une catégorie
+    async function loadCategoryParts() {
+      try {
+        allParts = await getLocalPartsByCategory(currentCategory.id);
+        applyFilters();
+      } catch (error) {
+        document.getElementById('app').innerHTML = `<div class="error">Erreur : ${error.message}</div>`;
+      }
+    }
+
+    // Appliquer les filtres et afficher les résultats
+    function applyFilters() {
+      filteredParts = filterParts(allParts, activeFilters, printFilter);
+      totalPages = Math.ceil(filteredParts.length / 100);
+      currentPage = Math.min(currentPage, Math.max(1, totalPages));
+      showCategoryParts();
+    }
+
+// Retour au menu principal
+function goToMenu() {
+  if (unifiedDataManager) {
+    unifiedDataManager.saveUnifiedData();
+  }
+  showCategories();
+}
+
+// Retour au menu principal (menu.html)
+function goToMainMenu() {
+  if (unifiedDataManager) {
+    unifiedDataManager.saveUnifiedData();
+  }
+  navigateTo('menu.html');
+}
+
+    // Afficher les pièces de la catégorie avec filtres
+    async function showCategoryParts() {
+      const keywords = generateKeywordsForCategory(currentCategory.id);
+      const startIndex = (currentPage - 1) * 100;
+      const endIndex = Math.min(startIndex + 100, filteredParts.length);
+      const currentPageParts = filteredParts.slice(startIndex, endIndex);
+
+      const app = document.getElementById('app');
+      app.innerHTML = `
+        <button class="back-button" onclick="goToMenu()">← Retour au Menu</button>
+
+        <h2>${currentCategory.name} (${filteredParts.length} pièces)</h2>
+
+        ${true ? `
+          
+        <div class="filters-section">
+            <div style="display: flex; gap: 15px; align-items: center; margin-bottom: 15px;">
+            <div style="flex: 1;"><input type="text" id="category-search" placeholder="Recherche: brick AND red, slope OR curved, NOT print" 
+            style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+        </div>
+        <button onclick="executeCategorySearch()" style="background: #2196f3; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer;">
+          Rechercher
+        </button>
+        <button onclick="clearCategorySearch()" style="background: #ff9800; color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer;">
+          Effacer recherche
+        </button>
+        </div>
+
+    <!-- Filtres temporaires de recherche -->
+${temporaryFilters.length > 0 ? `
+  <div style="margin-bottom: 15px;">
+    <div class="filters-title">Recherches actives :</div>
+    <div class="keyword-filters">
+      ${temporaryFilters.map(filter => `
+        <label class="keyword-filter" style="background: ${filter.autoSearch ? '#fff3e0' : '#e3f2fd'}; border-color: ${filter.autoSearch ? '#ff9800' : '#2196f3'};">
+          <input type="checkbox" checked onchange="toggleTemporaryFilter('${filter.id}')">
+          "${filter.query}" (${filter.count} résultats)${filter.autoSearch ? ' - auto' : ''}
+        </label>
+      `).join('')}
+    </div>
+  </div>
+` : ''}
+
+            <div class="filters-title">Filtre "Print" :</div>
+            <div class="keyword-filters" style="margin-bottom: 15px;">
+              <label class="keyword-filter">
+                <input type="radio" name="printFilter" value="no-print" onchange="setPrintFilter('no-print')"
+                       ${printFilter === 'no-print' ? 'checked' : ''}>
+                Sans Print
+              </label>
+              <label class="keyword-filter">
+                <input type="radio" name="printFilter" value="print" onchange="setPrintFilter('print')"
+                       ${printFilter === 'print' ? 'checked' : ''}>
+                Avec Print
+              </label>
+              <label class="keyword-filter">
+                <input type="radio" name="printFilter" value="all" onchange="setPrintFilter('all')"
+                       ${printFilter === 'all' ? 'checked' : ''}>
+                Tous
+              </label>
+            </div>
+            <div class="filters-title">Filtres par mots-clés :</div>
+            <div class="keyword-filters">
+              ${keywords.map(keyword => `
+                <label class="keyword-filter">
+                  <input type="checkbox" value="${keyword}" onchange="toggleFilter('${keyword}')"
+                         ${activeFilters.includes(keyword) ? 'checked' : ''}>
+                  ${keyword}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+
+        ${activeFilters.length > 0 ? `
+          <div class="active-filters">
+            <strong>Filtres actifs :</strong> ${activeFilters.join(', ')}
+            <button onclick="clearAllFilters()" style="margin-left: 10px; background: #ff9800; color: white; border: none; padding: 2px 8px; border-radius: 3px; cursor: pointer;">
+              Effacer tous
+            </button>
+          </div>
+        ` : ''}
+
+        ${totalPages > 1 ? `
+          <div class="pagination">
+            <button onclick="changePage(${currentPage - 1})" ${currentPage <= 1 ? 'disabled' : ''}>
+              ← Précédent
+            </button>
+            <span>Page ${currentPage} sur ${totalPages}</span>
+            <button onclick="changePage(${currentPage + 1})" ${currentPage >= totalPages ? 'disabled' : ''}>
+              Suivant →
+            </button>
+          </div>
+        ` : ''}
+
+        <div class="parts-grid" id="parts-grid">
+          <div class="loading">Chargement des images...</div>
+        </div>
+
+        ${totalPages > 1 ? `
+          <div class="pagination">
+            <button onclick="changePage(${currentPage - 1})" ${currentPage <= 1 ? 'disabled' : ''}>
+              ← Précédent
+            </button>
+            <span>Page ${currentPage} sur ${totalPages}</span>
+            <button onclick="changePage(${currentPage + 1})" ${currentPage >= totalPages ? 'disabled' : ''}>
+              Suivant →
+            </button>
+          </div>
+        ` : ''}
+      `;
+
+// Charger les images des pièces de manière asynchrone
+const partsGrid = document.getElementById('parts-grid');
+partsGrid.innerHTML = '';
+
+for (const part of currentPageParts) {
+  const partDiv = document.createElement('div');
+  partDiv.className = 'part-card';
+  
+  // D'abord afficher la structure de base
+  partDiv.innerHTML = `
+  <div style="width: 100px; height: 100px; background: #f5f5f5; border: 1px solid #ddd; border-radius: 3px; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px; cursor: pointer;" 
+       class="part-image-container"
+       data-part-num="${part.part_num}"
+       data-part-name="${escapeHTML(part.name)}"
+       data-category-name="${escapeHTML(currentCategory.name)}">
+             Chargement...
+    </div>
+    <div class="part-name">${part.name || 'Nom non disponible'}</div>
+    <div class="part-number">#${part.part_num || 'N/A'}</div>
+    <div style="font-size: 0.8em; color: #666; margin: 5px 0;" id="color-count-${part.part_num}">
+      Chargement couleurs...
+    </div>
+    <div class="inventory-controls" id="controls-${part.part_num}">
+      <!-- Les contrôles seront ajoutés après chargement des couleurs -->
+    </div>
+  `;
+  
+  partsGrid.appendChild(partDiv);
+  
+  // Charger l'image et les couleurs de manière asynchrone
+  Promise.all([
+    getPartImageUrl(part),
+    getPartColors(part.part_num)
+  ]).then(([imageUrl, colors]) => {
+    // VÉRIFIER QUE LES ÉLÉMENTS EXISTENT ENCORE
+    if (!partDiv.parentNode) {
+      console.warn(`PartDiv disparu pour ${part.part_num}`);
+      return;
+    }
+    
+    const colorCount = colors.length;
+    
+    // Mettre à jour l'image - TOUJOURS l'afficher même avec une seule couleur
+    const imgContainer = partDiv.querySelector('div[data-part-num]');
+    if (!imgContainer) {
+      console.warn(`imgContainer disparu pour ${part.part_num}`);
+      return;
+    }
+    
+    const img = new Image();
+    img.onload = () => {
+      // VÉRIFIER QUE L'ÉLÉMENT EXISTE TOUJOURS
+      if (imgContainer && imgContainer.parentNode) {
+        imgContainer.innerHTML = `<img src="${imageUrl}" alt="${part.name || 'Pièce LEGO'}" style="width: 100px; height: 100px; object-fit: contain;">`;
+      }
+    };
+    img.onerror = () => {
+      // Essayer l'URL de fallback
+      const fallbackUrl = `https://cdn.rebrickable.com/media/parts/elements/${part.part_num}.jpg`;
+      const fallbackImg = new Image();
+      fallbackImg.onload = () => {
+        if (imgContainer && imgContainer.parentNode) {
+          imgContainer.innerHTML = `<img src="${fallbackUrl}" alt="${part.name || 'Pièce LEGO'}" style="width: 100px; height: 100px; object-fit: contain;">`;
+        }
+      };
+      fallbackImg.onerror = () => {
+        if (imgContainer && imgContainer.parentNode) {
+          imgContainer.innerHTML = `<div style="width: 100px; height: 100px; background: #f0f0f0; border: 2px solid #ddd; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 0.8em; color: #666;"><div>📦</div><div>No Image</div></div>`;
+        }
+      };
+      fallbackImg.src = fallbackUrl;
+    };
+    img.src = imageUrl;
+
+    // Mettre à jour le compteur de couleurs - MODIFIÉ
+    const colorCountDiv = document.getElementById(`color-count-${part.part_num}`);
+    if (colorCountDiv && colorCountDiv.parentNode) {
+      if (colorCount === 1) {
+        colorCountDiv.textContent = colors[0].name === 'Standard' ? 'Couleur standard' : 
+                                    colors[0].name === 'Noir' ? 'Noir' : colors[0].name;
+      } else {
+        colorCountDiv.textContent = `${colorCount} couleurs`;
+      }
+    }
+    
+    // Mettre à jour les contrôles - MODIFIÉ
+    const controlsDiv = document.getElementById(`controls-${part.part_num}`);
+    if (controlsDiv && controlsDiv.parentNode) {
+if (colorCount === 1 && colors[0]) {
+  const color = colors[0];
+  const currentQty = unifiedDataManager.getInventoryQuantity(part.part_num, color.id);
+  
+  const safePartNum = part.part_num.replace(/'/g, "\\'");
+  const safePartName = (part.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+  const safeCategoryName = (currentCategory.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+  const safeColorName = (color.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+  controlsDiv.innerHTML = `
+    <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px;">
+      ${window.secureButtonManager.createButton({
+        action: 'decrement',
+        partNum: safePartNum,
+        partName: safePartName,
+        category: safeCategoryName,
+        colorId: color.id,
+        colorName: safeColorName,
+        disabled: currentQty <= 0,
+        label: '-',
+        className: 'btn btn-sm'
+      })}
+      <span id="qty_${part.part_num}_${color.id}" style="min-width: 30px; text-align: center; font-weight: bold;">
+        ${currentQty}
+      </span>
+      ${window.secureButtonManager.createButton({
+        action: 'increment',
+        partNum: safePartNum,
+        partName: safePartName,
+        category: safeCategoryName,
+        colorId: color.id,
+        colorName: safeColorName,
+        disabled: false,
+        label: '+',
+        className: 'btn btn-sm'
+      })}
+    </div>
+  `;
+}
+      
+      else if (colorCount > 1) {
+        controlsDiv.innerHTML = `
+          <div style="text-align: center; margin-top: 10px; font-size: 0.8em; color: #666;">
+            Cliquez sur l'image pour gérer les couleurs
+          </div>
+        `;
+      }
+
+      // Stocker les couleurs pour l'utilisation dans le clic
+      if (partDiv.parentNode) {
+        partDiv.setAttribute('data-colors', JSON.stringify(colors));
+      }
+    }
+      
+  }).catch(error => {
+    console.error('Erreur chargement données pièce:', error);
+    const imgContainer = partDiv.querySelector('div[data-part-num]');
+    if (imgContainer && imgContainer.parentNode) {
+      imgContainer.innerHTML = `<img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjRjVGNUY1Ii8+CjxyZWN0IHg9IjEiIHk9IjEiIHdpZHRoPSI5OCIgaGVpZ2h0PSI5OCIgc3Ryb2tlPSIjREREIi8+Cjx0ZXh0IHg9IjUwIiB5PSI1NSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5FcnJldXI8L3RleHQ+Cjwvc3ZnPgo=" style="width: 100px; height: 100px; object-fit: contain;">`;
+    }
+    
+    const colorCountDiv = document.getElementById(`color-count-${part.part_num}`);
+    if (colorCountDiv && colorCountDiv.parentNode) {
+      colorCountDiv.textContent = "Erreur chargement";
+    }
+  });
+
+}
+    }
+
+    
+// Exécuter une recherche globale
+async function executeGlobalSearch() {
+  const globalSearchInput = document.getElementById('global-search');
+  if (!globalSearchInput) return; // Vérifier que l'élément existe
+  
+const query = globalSearchInput.value.trim();
+  if (!query) return;
+  
+  const app = document.getElementById('app');
+  app.innerHTML = `<div class="loading">Recherche globale en cours...</div>`;
+  
+  try {
+    // Rechercher dans toutes les pièces de toutes les catégories
+    const allParts = await db.getData('parts');
+    const searchResults = performAdvancedSearch(allParts, query);
+    
+    if (searchResults.length === 0) {
+      app.innerHTML = `
+        <div class="error">
+          <h3>Aucun résultat trouvé</h3>
+          <p>Aucune pièce ne correspond à votre recherche : "${query}"</p>
+          <button class="btn" onclick="showCategories()">Retour aux catégories</button>
+        </div>
+      `;
+      return;
+    }
+    
+    // Ajouter la recherche comme filtre temporaire global
+    const filterId = 'global_search_' + Date.now();
+    const newFilter = {
+      id: filterId,
+      query: query,
+      count: searchResults.length,
+      isGlobal: true,
+      results: searchResults
+    };
+    
+    temporaryFilters = [newFilter]; // Remplacer les filtres existants
+    
+    // Afficher les résultats groupés par catégorie
+    await showGlobalSearchResultsGrouped(searchResults);
+    
+  } catch (error) {
+    console.error('Erreur recherche globale:', error);
+    app.innerHTML = `
+      <div class="error">
+        <h3>Erreur de recherche</h3>
+        <p>Une erreur s'est produite lors de la recherche.</p>
+        <button class="btn" onclick="showCategories()">Retour aux catégories</button>
+      </div>
+    `;
+  }
+}
+
+// Exécuter une recherche dans la catégorie courante
+function executeCategorySearch() {
+  const categorySearchInput = document.getElementById('category-search');
+  if (!categorySearchInput) return; // Vérifier que l'élément existe
+  
+  const query = categorySearchInput.value.trim();
+  if (!query) return; // Ne rien faire si la requête est vide
+
+// Vérifier si ce filtre existe déjà 
+  const existingFilter = temporaryFilters.find(f => f.query === query && !f.isGlobal);
+  if (existingFilter) {
+    alert('Cette recherche est déjà active');
+    categorySearchInput.value = '';
+    return;
+  }
+
+  // Effectuer la recherche sur les pièces actuelles de la catégorie
+  const searchResults = performAdvancedSearch(allParts, query);
+
+  // Ajouter comme filtre temporaire
+  const filterId = 'category_search_' + Date.now();
+  const newFilter = {
+    id: filterId,
+    query: query,
+    count: searchResults.length,
+    results: searchResults,
+    isGlobal: false,
+
+  };
+  
+  temporaryFilters.push(newFilter);
+  
+  // Effacer le champ de recherche
+  categorySearchInput.value = '';
+  
+  // Reappliquer les filtres
+  applyFilters();
+}
+
+// Afficher les résultats de recherche globale groupés par catégorie
+async function showGlobalSearchResultsGrouped(searchResults) {
+  const app = document.getElementById('app');
+  
+  // Récupérer les catégories et grouper les résultats
+  const categories = await db.getData('part_categories');
+  const categoryMap = new Map();
+  
+  categories.forEach(cat => {
+    categoryMap.set(cat.id, { ...cat, parts: [] });
+  });
+  
+  searchResults.forEach(part => {
+    const category = categoryMap.get(part.part_cat_id);
+    if (category) {
+      category.parts.push(part);
+    }
+  });
+  
+  const resultsByCategory = Array.from(categoryMap.values())
+    .filter(cat => cat.parts.length > 0)
+    .sort((a, b) => b.parts.length - a.parts.length);
+  
+  app.innerHTML = `
+    <div class="update-section">
+      <h3>Résultats de recherche globale</h3>
+      <p>${searchResults.length} pièces trouvées dans ${resultsByCategory.length} catégories</p>
+      <button class="btn btn-warning" onclick="showCategories()">Nouvelle recherche</button>
+    </div>
+    
+    <!-- Section de recherche avec filtres temporaires -->
+    <div style="background: #f0f8ff; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #2196f3;">
+      <h3>Affiner la recherche</h3>
+      <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px;">
+        <input type="text" id="global-search-refine" placeholder="Recherche supplémentaire (ex: brick AND red)" 
+               style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 1em;">
+        <button onclick="executeGlobalSearchRefine()" style="background: #2196f3; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">
+          Affiner
+        </button>
+      </div>
+      
+      <!-- Filtres temporaires actifs -->
+      ${temporaryFilters.length > 0 ? `
+        <div>
+          <div class="filters-title">Recherches actives :</div>
+          <div class="keyword-filters">
+            ${temporaryFilters.map(filter => `
+              <label class="keyword-filter" style="background: #e3f2fd; border-color: #2196f3;">
+                <input type="checkbox" checked onchange="toggleGlobalTemporaryFilter('${filter.id}')">
+                "${filter.query}" (${filter.count} résultats)
+              </label>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+    </div>
+    
+    <!-- Résultats par catégorie -->
+    <div id="global-results-container"></div>
+  `;
+  
+  // Afficher les résultats par catégorie
+  const resultsContainer = document.getElementById('global-results-container');
+  
+  for (const category of resultsByCategory) {
+    const categorySection = document.createElement('div');
+    categorySection.style.cssText = 'margin: 30px 0; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;';
+    
+    categorySection.innerHTML = `
+      <div style="background: #f8f9fa; padding: 15px; border-bottom: 1px solid #ddd;">
+        <h3 style="margin: 0; color: #333;">${category.name} (${category.parts.length} pièces)</h3>
+      </div>
+      <div style="padding: 20px;">
+        <div class="parts-grid" id="global-parts-${category.id}">
+          <div class="loading">Chargement des pièces...</div>
+        </div>
+      </div>
+    `;
+    
+    resultsContainer.appendChild(categorySection);
+    
+    // Charger les pièces de cette catégorie de manière asynchrone
+    setTimeout(() => loadGlobalCategoryParts(category), 100);
+  }
+}
+
+// Charger les pièces d'une catégorie dans les résultats globaux
+async function loadGlobalCategoryParts(category) {
+  const partsGrid = document.getElementById(`global-parts-${category.id}`);
+  if (!partsGrid) return;
+  
+  partsGrid.innerHTML = '';
+  
+  // Prendre seulement les 20 premières pièces pour éviter de surcharger
+  const displayParts = category.parts.slice(0, 20);
+  
+  for (const part of displayParts) {
+    const partDiv = document.createElement('div');
+    partDiv.className = 'part-card';
+    
+    partDiv.innerHTML = `
+  <div style="width: 100px; height: 100px; background: #f5f5f5; border: 1px solid #ddd; border-radius: 3px; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px; cursor: pointer;" 
+       class="global-part-image-container"
+       data-part-num="${part.part_num}"
+       data-part-name="${escapeHTML(part.name)}"
+       data-category-name="${escapeHTML(category.name)}">
+               Chargement...
+      </div>
+      <div class="part-name">${part.name || 'Nom non disponible'}</div>
+      <div class="part-number">#${part.part_num || 'N/A'}</div>
+      <div style="font-size: 0.8em; color: #666; margin: 5px 0;" id="global-color-count-${part.part_num}">
+        Chargement couleurs...
+      </div>
+      <div class="inventory-controls" id="global-controls-${part.part_num}">
+        <!-- Les contrôles seront ajoutés après chargement des couleurs -->
+      </div>
+    `;
+    
+    partsGrid.appendChild(partDiv);
+    
+    // Charger l'image et les couleurs de manière asynchrone
+    Promise.all([
+      getPartImageUrl(part),
+      getPartColors(part.part_num)
+    ]).then(([imageUrl, colors]) => {
+         // VÉRIFIER QUE LES ÉLÉMENTS EXISTENT ENCORE
+    const imgContainer = partDiv.querySelector('.global-part-image-container');
+    if (!imgContainer) {
+      console.warn(`Container disparu pour ${part.part_num}`);
+      return;
+    } 
+      const colorCount = colors.length;
+    // Mettre à jour l'image
+    const img = new Image();
+    img.onload = () => {
+      if (imgContainer && imgContainer.parentNode) { // DOUBLE VÉRIFICATION
+        imgContainer.innerHTML = `<img src="${imageUrl}" alt="${part.name || 'Pièce LEGO'}" style="width: 100px; height: 100px; object-fit: contain;">`;
+      }
+    };
+    img.onerror = () => {
+      if (imgContainer && imgContainer.parentNode) { // DOUBLE VÉRIFICATION
+        imgContainer.innerHTML = `<img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjYwIiBoZWlnaHQ9IjYwIiBmaWxsPSIjRjVGNUY1Ii8+CjxyZWN0IHg9IjEiIHk9IjEiIHdpZHRoPSI1OCIgaGVpZ2h0PSI1OCIgc3Ryb2tlPSIjREREIi8+Cjx0ZXh0IHg9IjMwIiB5PSIzNSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOTk5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5ObyBJbWFnZTwvdGV4dD4KPHN2Zz4K" style="width: 100px; height: 100px; object-fit: contain;">`;
+      }
+    };
+    img.src = imageUrl;
+      
+      // Mettre à jour le compteur de couleurs
+   const colorCountDiv = document.getElementById(`global-color-count-${part.part_num}`);
+    if (colorCountDiv && colorCountDiv.parentNode) { // VÉRIFICATION EXISTENCE
+      if (colorCount === 1) {
+        colorCountDiv.textContent = colors[0].name === 'Standard' ? 'Couleur standard' : 
+                                    colors[0].name === 'Noir' ? 'Noir' : colors[0].name;
+      } else {
+        colorCountDiv.textContent = `${colorCount} couleurs`;
+      }
+    }
+      
+    // Mettre à jour les contrôles
+    const controlsDiv = document.getElementById(`global-controls-${part.part_num}`);
+    if (controlsDiv && controlsDiv.parentNode) { // VÉRIFICATION EXISTENCE
+      if (colorCount === 1 && colors[0]) {
+        const color = colors[0];
+        const currentQty = unifiedDataManager.getInventoryQuantity(part.part_num, color.id);
+        
+        const safePartNum = part.part_num.replace(/'/g, "\\'");
+        const safePartName = (part.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        const safeCategoryName = (category.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        const safeColorName = (color.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+        controlsDiv.innerHTML = `
+          <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px;">
+            ${window.secureButtonManager.createButton({
+              action: 'decrement',
+              partNum: safePartNum,
+              partName: safePartName,
+              category: safeCategoryName,
+              colorId: color.id,
+              colorName: safeColorName,
+              disabled: currentQty <= 0,
+              label: '-',
+              className: 'btn btn-sm'
+            })}
+            <span id="global_qty_${part.part_num}_${color.id}" style="min-width: 30px; text-align: center; font-weight: bold;">
+              ${currentQty}
+            </span>
+            ${window.secureButtonManager.createButton({
+              action: 'increment',
+              partNum: safePartNum,
+              partName: safePartName,
+              category: safeCategoryName,
+              colorId: color.id,
+              colorName: safeColorName,
+              label: '+',
+              className: 'btn btn-sm'
+            })}
+          </div>
+        `;
+      } else if (colorCount > 1) {
+        controlsDiv.innerHTML = `
+          <div style="text-align: center; margin-top: 10px; font-size: 0.8em; color: #666;">
+            Cliquez sur l'image pour gérer les couleurs
+          </div>
+        `;
+      }
+
+        // Stocker les couleurs pour l'utilisation dans le clic
+      if (partDiv.parentNode) { // VÉRIFICATION QUE partDiv EST TOUJOURS DANS LE DOM
+        partDiv.setAttribute('data-colors', JSON.stringify(colors));
+      }
+    }
+  }).catch(error => {
+    console.error('Erreur chargement données pièce:', error);
+    // VÉRIFIER QUE imgContainer EXISTE AVANT DE MODIFIER
+    const imgContainer = partDiv.querySelector('.global-part-image-container');
+    if (imgContainer && imgContainer.parentNode) {
+      imgContainer.innerHTML = `<img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjRjVGNUY1Ii8+CjxyZWN0IHg9IjEiIHk9IjEiIHdpZHRoPSI5OCIgaGVpZ2h0PSI5OCIgc3Ryb2tlPSIjREREIi8+Cjx0ZXh0IHg9IjUwIiB5PSI1NSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5FcnJldXI8L3RleHQ+Cjwvc3ZnPgo=" style="width: 100px; height: 100px; object-fit: contain;">`;
+    }
+    
+    const colorCountDiv = document.getElementById(`global-color-count-${part.part_num}`);
+    if (colorCountDiv && colorCountDiv.parentNode) {
+      colorCountDiv.textContent = "Erreur chargement";
+    }
+  });
+}
+  
+  // Afficher un message s'il y a plus de 20 pièces
+  if (category.parts.length > 20) {
+    const moreDiv = document.createElement('div');
+    moreDiv.style.cssText = 'text-align: center; padding: 20px; color: #666; font-style: italic;';
+    moreDiv.textContent = `Et ${category.parts.length - 20} autres pièces dans cette catégorie...`;
+    partsGrid.appendChild(moreDiv);
+  }
+}
+
+// Affiner la recherche globale
+async function executeGlobalSearchRefine() {
+  const refineInput = document.getElementById('global-search-refine');
+  if (!refineInput) return; // Vérifier que l'élément existe
+  
+  const query = refineInput.value.trim();
+  if (!query) return;
+
+  // Ajouter le nouveau filtre
+  const filterId = 'global_refine_' + Date.now();
+  const newFilter = {
+    id: filterId,
+    query: query,
+    count: 0, // Sera calculé
+    isGlobal: true
+  };
+  
+  temporaryFilters.push(newFilter);
+  
+  // Effacer le champ
+  refineInput.value = '';
+  
+  // Recalculer les résultats
+  await applyGlobalFilters();
+}
+
+// Appliquer les filtres temporaires globaux
+async function applyGlobalFilters() {
+  let filtered = await db.getData('parts');
+  
+  // Appliquer tous les filtres temporaires
+  for (const tempFilter of temporaryFilters) {
+    filtered = performAdvancedSearch(filtered, tempFilter.query);
+  }
+  
+  // Mettre à jour les compteurs
+  for (const filter of temporaryFilters) {
+    filter.count = performAdvancedSearch(await db.getData('parts'), filter.query).length;
+  }
+  
+  // Réafficher les résultats
+  await showGlobalSearchResultsGrouped(filtered);
+}
+
+// Basculer un filtre temporaire global
+async function toggleGlobalTemporaryFilter(filterId) {
+  const filterIndex = temporaryFilters.findIndex(f => f.id === filterId);
+  if (filterIndex > -1) {
+    temporaryFilters.splice(filterIndex, 1);
+    
+    if (temporaryFilters.length === 0) {
+      showCategories();
+    } else {
+      await applyGlobalFilters();
+    }
+  }
+}
+
+// Afficher les résultats de recherche globale
+function showGlobalSearchResults(query, resultsByCategory, totalCount) {
+  const app = document.getElementById('app');
+  
+  app.innerHTML = `
+    <div class="update-section">
+      <h3>Résultats de recherche : "${query}"</h3>
+      <p>${totalCount} pièces trouvées dans ${resultsByCategory.length} catégories</p>
+      <button class="btn btn-warning" onclick="showCategories()">Nouvelle recherche</button>
+    </div>
+    
+    <div class="grid">
+      ${resultsByCategory.map(category => `
+        <div class="category-card" onclick="showSearchResultsInCategory(${category.id}, '${category.name}', '${query}')">
+          <div class="category-title">${category.name}</div>
+          <div class="category-count">${category.parts.length} pièces trouvées</div>
+          <div style="font-size: 0.8em; color: #666; margin-top: 5px;">
+            Cliquez pour voir les pièces
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// Afficher les résultats dans une catégorie spécifique
+function showSearchResultsInCategory(categoryId, categoryName, query) {
+  currentCategory = { id: categoryId, name: categoryName };
+  
+  // Ajouter la recherche comme filtre temporaire
+  const filterId = 'global_search_' + Date.now();
+  const newFilter = {
+    id: filterId,
+    query: query,
+    count: 0, // Sera mis à jour
+    isGlobal: true
+  };
+  
+  temporaryFilters = [newFilter]; // Remplacer les filtres existants
+  activeFilters = [];
+  printFilter = 'all';
+  currentPage = 1;
+  
+  loadCategoryParts();
+}
+
+// Basculer un filtre temporaire
+function toggleTemporaryFilter(filterId) {
+  const filterIndex = temporaryFilters.findIndex(f => f.id === filterId);
+  if (filterIndex > -1) {
+    temporaryFilters.splice(filterIndex, 1);
+    applyFilters();
+  }
+}
+
+// Modifier applyFilters pour inclure les filtres temporaires
+function applyFilters() {
+  let filtered = allParts;
+  
+  // Appliquer les filtres temporaires
+  if (temporaryFilters.length > 0) {
+    for (const tempFilter of temporaryFilters) {
+      if (tempFilter.isGlobal) {
+        // Pour les recherches globales, filtrer par la requête
+        filtered = performAdvancedSearch(filtered, tempFilter.query);
+      } else {
+        // Pour les recherches locales, utiliser les résultats stockés
+        const partNums = new Set(tempFilter.results.map(p => p.part_num));
+        filtered = filtered.filter(part => partNums.has(part.part_num));
+      }
+    }
+  }
+  
+  // Appliquer les autres filtres existants
+  filteredParts = filterParts(filtered, activeFilters, printFilter);
+  
+  // Mettre à jour le nombre de résultats dans les filtres temporaires
+  temporaryFilters.forEach(filter => {
+    if (!filter.isGlobal) {
+      filter.count = filter.results.filter(part => 
+        filteredParts.some(fp => fp.part_num === part.part_num)
+      ).length;
+    }
+  });
+  
+  totalPages = Math.ceil(filteredParts.length / 100);
+  currentPage = Math.min(currentPage, Math.max(1, totalPages));
+  showCategoryParts();
+}
+
+function clearCategorySearch() {
+  temporaryFilters = [];
+  applyFilters();
+}
+
+    // Changer le filtre print
+    function setPrintFilter(value) {
+      printFilter = value;
+      currentPage = 1;
+      applyFilters();
+    }
+
+    // Activer/désactiver un filtre par mot-clé
+    function toggleFilter(keyword) {
+      const index = activeFilters.indexOf(keyword);
+      if (index > -1) {
+        activeFilters.splice(index, 1);
+      } else {
+        activeFilters.push(keyword);
+      }
+      applyFilters();
+    }
+
+    // Effacer tous les filtres
+    function clearAllFilters() {
+      activeFilters = [];
+      printFilter = 'no-print';
+      applyFilters();
+    }
+
+// Afficher le popup de sélection des couleurs
+function showColorPopup(part, categoryName, colors) {
+  debugGroup('🎨 showColorPopup');
+  debug('📦 Part:', part.part_num, part.name);
+  debug('🎨 Colors:', colors.length, 'couleurs');
+  
+  const popup = document.createElement('div');
+  popup.id = 'color-popup';
+  popup.style.cssText = `
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.8); z-index: 1000; display: flex;
+    align-items: center; justify-content: center;
+  `;
+  
+  const content = document.createElement('div');
+  content.style.cssText = `
+    background: white; border-radius: 10px; padding: 20px; max-width: 80%;
+    max-height: 80%; overflow-y: auto;
+  `;
+  
+  const escapedPartName = (part.name || 'Pièce LEGO').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+  const escapedPartNum = String(part.part_num).replace(/'/g, "\\'");
+  const escapedCategoryName = (categoryName || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+  // Préparer le HTML des couleurs
+  const colorsHTML = colors.map(color => {
+    // ✅ CORRECTION : Récupérer currentQty ICI, dans le map
+    const currentQty = unifiedDataManager.getInventoryQuantity(part.part_num, color.id);
+    
+    debug(`  🎨 ${color.name} (${color.id}): qty=${currentQty}`);
+    
+    const safePartNum = String(part.part_num).replace(/'/g, "\\'");
+    const safePartName = window.secureButtonManager.escapeAttr(part.name || '');
+    const safeCategoryName = escapedCategoryName;
+    const safeColorName = (color.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    
+    return `
+      <div style="border: 1px solid #ddd; border-radius: 8px; padding: 15px; text-align: center;">
+        <img src="${color.img_url}" alt="${safePartName} ${safeColorName}" 
+             style="width: 100px; height: 100px; object-fit: contain; margin-bottom: 10px;"
+             onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjYwIiBoZWlnaHQ9IjYwIiBmaWxsPSIjRjVGNUY1Ii8+CjxyZWN0IHg9IjEiIHk9IjEiIHdpZHRoPSI1OCIgaGVpZ2h0PSI1OCIgc3Ryb2tlPSIjREREIi8+Cjx0ZXh0IHg9IjMwIiB5PSIzNSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOTk5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5ObyBJbWFnZTwvdGV4dD4KPHN2Zz4K'">
+        <div style="font-weight: bold; margin-bottom: 10px;">${safeColorName}</div>
+        <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+          ${window.secureButtonManager.createButton({
+            action: 'decrement',
+            partNum: safePartNum,
+            partName: safePartName,
+            category: safeCategoryName,
+            colorId: color.id,
+            colorName: safeColorName,
+            disabled: currentQty <= 0,
+            label: '-',
+            className: 'btn btn-sm'
+          })}
+          <span id="qty_${part.part_num}_${color.id}" style="min-width: 30px; text-align: center; font-weight: bold;">
+            ${currentQty}
+          </span>
+          ${window.secureButtonManager.createButton({
+            action: 'increment',
+            partNum: safePartNum,
+            partName: safePartName,
+            category: safeCategoryName,
+            colorId: color.id,
+            colorName: safeColorName,
+            label: '+',
+            className: 'btn btn-sm'
+          })}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  content.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <h3>${escapedPartName} - #${escapedPartNum}</h3>
+      <button onclick="closeColorPopup()" style="background: #f44336; color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer;">×</button>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+      ${colorsHTML}
+    </div>
+  `;
+  
+  popup.appendChild(content);
+  document.body.appendChild(popup);
+  
+  debug('✅ Popup créé et affiché');
+  debugGroupEnd();
+  
+  // Fermer en cliquant à l'extérieur
+  popup.addEventListener('click', (e) => {
+    if (e.target === popup) {
+      closeColorPopup();
+    }
+  });
+}
+
+function closeColorPopup() {
+  const popup = document.getElementById('color-popup');
+  if (popup) {
+    popup.remove();
+  }
+}
+
+    // Changer de page
+    function changePage(newPage) {
+      if (newPage >= 1 && newPage <= totalPages) {
+        currentPage = newPage;
+        showCategoryParts();
+      }
+    }
+
+function getMissingPartsInfo() {
+  const missingInfo = {};
+  
+  try {
+    if (!unifiedDataManager || !unifiedDataManager.currentData.sets) return missingInfo;
+    
+    // Parcourir tous les sets du format unifié
+    for (const set of unifiedDataManager.currentData.sets) {
+      if (set.parts && Array.isArray(set.parts)) {
+        for (const part of set.parts) {
+          const quantityOwned = part.quantity_owned || 0;
+          if (quantityOwned < part.quantity) {
+            // Utiliser la structure unifiée
+            const key = `${part.part_num}_${part.color_id}`;
+            if (!missingInfo[key]) {
+              missingInfo[key] = {
+                partNum: part.part_num,
+                colorId: part.color_id,
+                colorName: part.color_name || 'Couleur inconnue',
+                sets: []
+              };
+            }
+            
+            missingInfo[key].sets.push({
+              setNumber: set.number,
+              setName: set.name,
+              needed: part.quantity,
+              owned: quantityOwned,
+              missing: part.quantity - quantityOwned
+            });
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Erreur récupération pièces manquantes:', error);
+  }
+  
+  return missingInfo;
+}
+
+// Afficher l'inventaire personnel (CORRIGÉ)
+async function showPersonalInventory() {
+  const inventory = unifiedDataManager.currentData.inventory;
+  const missingPartsInfo = getMissingPartsInfo();
+
+  const uniqueInventory = [];
+  const seen = new Set();
+  
+  for (const item of inventory) {
+    const key = `${item.part_num}_${item.color_id}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      
+      let enrichedItem = { ...item };
+      
+      if (!item.name || item.name === '') {
+        try {
+          const partsData = await db.getData('parts');
+          const partInfo = partsData.find(p => p.part_num === item.part_num);
+          if (partInfo) {
+            enrichedItem.name = partInfo.name;
+          }
+        } catch (error) {
+          console.warn('Erreur récupération nom pièce:', error);
+          enrichedItem.name = 'Nom non disponible';
+        }
+      }
+      
+      uniqueInventory.push(enrichedItem);
+    }
+  }
+
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <button class="back-button" onclick="showCategories()">← Retour aux catégories</button>
+    
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <h2>Mon Inventaire LEGO (${uniqueInventory.length} références)</h2>
+      <button class="btn" onclick="unifiedDataManager.exportData()">📥 Exporter JSON</button>
+    </div>
+    
+    ${uniqueInventory.length === 0 ? `
+      <div style="text-align: center; padding: 40px; color: #666;">
+        <p>Votre inventaire est vide.</p>
+        <p>Ajoutez des pièces depuis les catégories pour les voir apparaître ici.</p>
+      </div>
+    ` : `
+      <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; background: white;">
+          <thead>
+            <tr style="background: #f5f5f5;">
+              <th style="border: 1px solid #ddd; padding: 10px; text-align: center;">Image</th>
+              <th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Nom</th>
+              <th style="border: 1px solid #ddd; padding: 10px; text-align: center;">Numéro</th>
+              <th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Catégorie</th>
+              <th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Couleur</th>
+              <th style="border: 1px solid #ddd; padding: 10px; text-align: center;">Quantité</th>
+              <th style="border: 1px solid #ddd; padding: 10px; text-align: center;">Actions</th>
+              <th style="border: 1px solid #ddd; padding: 10px; text-align: center;">Manquant dans</th>
+              <th style="border: 1px solid #ddd; padding: 10px; text-align: center;">Transférer</th>
+              <th style="border: 1px solid #ddd; padding: 10px; text-align: center; background: #fff3cd;">🔍 Pièce rare</th>
+              <th style="border: 1px solid #ddd; padding: 10px; text-align: center; background: #d1ecf1;">✨ Nouveau set possible ?</th>
+            </tr>
+          </thead>
+          <tbody id="inventory-table-body">
+            ${await generateInventoryRows(uniqueInventory, missingPartsInfo)}
+          </tbody>
+        </table>
+      </div>
+    `}
+  `;
+
+  // Charger les images de façon asynchrone APRÈS avoir généré le HTML
+  for (let i = 0; i < uniqueInventory.length; i++) {
+    const item = uniqueInventory[i];
+    loadInventoryImageOptimized(item.part_num, item.color_id, i);
+    
+    // Charger aussi les miniatures des sets
+    const key = `${item.part_num}_${item.color_id}`;
+    const missingInSets = missingPartsInfo[key] ? missingPartsInfo[key].sets : [];
+    for (const set of missingInSets) {
+      loadSetMiniatureLazy(set.setNumber, `set-img-${set.setNumber}-${i}`);
+    }
+  }
+}
+
+async function analyzeInventoryForRarityAndSets() {
+  try {
+    // Vérifier le cache AVANT tout chargement
+    if (unifiedDataManager.isAnalysisCacheValid()) {
+      debug('✓ Cache valide, chargement instantané');
+      const cache = unifiedDataManager.currentData.analysisCache;
+      return {
+        rareParts: Array.isArray(cache.rareParts) ? cache.rareParts : [],
+        possibleNewSets: Array.isArray(cache.possibleSets) ? cache.possibleSets : []
+      };
+    }
+    
+    debug('⚙ Nouvelle analyse (optimisée)...');
+    const startTime = performance.now();
+    
+    const inventory = unifiedDataManager.currentData.inventory;
+    const ownedSets = new Set(unifiedDataManager.currentData.sets.map(s => s.number));
+    
+    // Charger le mapping inventory → set
+    const inventories = await db.getData('inventories');
+    const invToSetMap = new Map(inventories.map(inv => [inv.id, inv.set_num]));
+    
+    // Charger seulement les inventory_parts nécessaires
+    const inventoryPartNums = new Set(inventory.map(i => i.part_num));
+    const relevantInventoryParts = [];
+    
+    await new Promise((resolve, reject) => {
+      const transaction = db.db.transaction(['inventory_parts'], 'readonly');
+      const store = transaction.objectStore('inventory_parts');
+      const request = store.openCursor();
+      
+      request.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (cursor) {
+          const item = cursor.value;
+          if (inventoryPartNums.has(item.part_num)) {
+            relevantInventoryParts.push(item);
+          }
+          cursor.continue();
+        } else {
+          resolve();
+        }
+      };
+      request.onerror = () => reject(request.error);
+    });
+    
+    debug(`→ Chargé ${relevantInventoryParts.length} inventory_parts pertinentes`);
+    
+    // Charger seulement les parts nécessaires
+    const partsMap = new Map();
+    for (const partNum of inventoryPartNums) {
+      const part = await db.getPartByNum(partNum);
+      if (part) partsMap.set(partNum, part);
+    }
+    
+    debug(`→ Chargé ${partsMap.size} parts pertinentes`);
+    
+    // Map optimisée : pièce → sets qui la contiennent
+    const partToSetsMap = new Map();
+    for (const invPart of relevantInventoryParts) {
+      const key = `${invPart.part_num}_${invPart.color_id}`;
+      if (!partToSetsMap.has(key)) {
+        partToSetsMap.set(key, new Set());
+      }
+      // IMPORTANT : Convertir inventory_id en set_num
+      const realSetNum = invToSetMap.get(invPart.inventory_id);
+      if (realSetNum && realSetNum.includes('-')) {
+        partToSetsMap.get(key).add(realSetNum);
+      }
+    }
+    
+    // Calculer les pièces uniques pour chaque set
+    const allSetsData = new Map();
+    for (const invPart of relevantInventoryParts) {
+      const realSetNum = invToSetMap.get(invPart.inventory_id);
+      if (realSetNum && realSetNum.includes('-')) {
+        if (!allSetsData.has(realSetNum)) {
+          allSetsData.set(realSetNum, new Set());
+        }
+        allSetsData.get(realSetNum).add(`${invPart.part_num}_${invPart.color_id}`);
+      }
+    }
+
+    // Calculer la rareté de chaque pièce
+    const partRarityScores = new Map();
+    const totalSetsInDB = allSetsData.size;
+    
+    for (const [partKey, setsContaining] of partToSetsMap.entries()) {
+      const rarityScore = Math.log(totalSetsInDB / Math.max(1, setsContaining.size));
+      partRarityScores.set(partKey, rarityScore);
+    }
+    
+    const rareParts = [];
+    const possibleNewSets = new Map();
+    const minifigCategories = [13, 59, 60, 61, 65, 71, 72, 73];
+    
+    // Analyse avec score pondéré
+    for (const item of inventory) {
+      const key = `${item.part_num}_${item.color_id}`;
+      const setsContainingPart = partToSetsMap.get(key);
+      
+      if (!setsContainingPart) continue;
+      
+      const partRarity = partRarityScores.get(key) || 0;
+      const partInfo = partsMap.get(item.part_num);
+      const isMinifigPart = partInfo && minifigCategories.includes(partInfo.part_cat_id);
+      
+      // Pièces rares (max 5 sets)
+      if (setsContainingPart.size <= 5 && setsContainingPart.size > 0) {
+        rareParts.push({
+          part_num: item.part_num,
+          color_id: item.color_id,
+          sets: Array.from(setsContainingPart)
+        });
+      }
+      
+      // Sets possibles avec score pondéré
+      for (const setNum of setsContainingPart) {
+        if (!ownedSets.has(setNum)) {
+          if (!possibleNewSets.has(setNum)) {
+            const totalUniqueParts = allSetsData.get(setNum)?.size || 0;
+            possibleNewSets.set(setNum, {
+              setId: setNum, // IMPORTANT : Ajouter setId
+              count: 0,
+              total: totalUniqueParts,
+              parts: [],
+              weightedScore: 0,
+              maxPossibleScore: 0,
+              hasMinifigParts: false
+            });
+          }
+          const setData = possibleNewSets.get(setNum);
+          setData.count++;
+          setData.parts.push(key);
+          setData.weightedScore += partRarity;
+          if (isMinifigPart) setData.hasMinifigParts = true;
+        }
+      }
+    }
+    
+    // Calculer le score maximal et les pourcentages
+    for (const [setNum, data] of possibleNewSets.entries()) {
+      const setParts = allSetsData.get(setNum);
+      if (setParts) {
+        for (const partKey of setParts) {
+          const rarityScore = partRarityScores.get(partKey) || 0;
+          data.maxPossibleScore += rarityScore;
+        }
+      }
+      
+      data.weightedPercentage = data.maxPossibleScore > 0 
+        ? (data.weightedScore / data.maxPossibleScore) * 100 
+        : 0;
+      
+      data.simplePercentage = data.total > 0 
+        ? (data.count / data.total) * 100 
+        : 0;
+    }
+    
+    // Filtrage hybride utilisant les deux scores - CONVERTIR EN TABLEAU
+    const viableSets = Array.from(possibleNewSets.values())
+      .filter((data) => {
+        if (data.total < 5) return false;
+        
+        const minPiecesOwned = Math.max(8, data.total * 0.15);
+        if (data.count < minPiecesOwned) return false;
+        
+        if (data.total <= 20) {
+          return data.weightedPercentage >= 50 || data.simplePercentage >= 70;
+        } else if (data.total <= 50) {
+          return data.weightedPercentage >= 40 || data.simplePercentage >= 60;
+        } else if (data.total <= 100) {
+          return data.weightedPercentage >= 30 || data.simplePercentage >= 50;
+        } else if (data.total <= 200) {
+          return data.weightedPercentage >= 25 || data.simplePercentage >= 40;
+        } else {
+          return data.weightedPercentage >= 20 || data.simplePercentage >= 30;
+        }
+      })
+      .sort((a, b) => {
+        if (Math.abs(b.weightedPercentage - a.weightedPercentage) > 5) {
+          return b.weightedPercentage - a.weightedPercentage;
+        }
+        return b.simplePercentage - a.simplePercentage;
+      })
+      .slice(0, 20);
+    
+    const endTime = performance.now();
+    debug(`✓ Analyse terminée en ${(endTime - startTime).toFixed(0)}ms`);
+    debug(`→ ${rareParts.length} pièces rares, ${viableSets.length} sets possibles`);
+    
+    await unifiedDataManager.saveAnalysisCache(rareParts, viableSets);
+    
+    return { rareParts, possibleNewSets: viableSets };
+    
+  } catch (error) {
+    console.error('Erreur analyse:', error);
+    return { rareParts: [], possibleNewSets: [] };
+  }
+}
+
+// Nouvelle fonction pour générer les lignes de l'inventaire
+async function generateInventoryRows(uniqueInventory, missingPartsInfo) {
+  const rows = [];
+
+    // Lancer l'analyse en arrière-plan
+  const analysisPromise = analyzeInventoryForRarityAndSets();
+  
+  for (let index = 0; index < uniqueInventory.length; index++) {
+    const item = uniqueInventory[index];
+    const key = `${item.part_num}_${item.color_id}`;
+    const missingInSets = missingPartsInfo[key] ? missingPartsInfo[key].sets : [];
+    
+    const escapedName = escapeHTML(item.name || 'Nom en cours de chargement...');
+    const escapedCategory = escapeHTML(item.category || 'Catégorie inconnue');
+    const escapedColorName = escapeHTML(item.color_name || 'Couleur inconnue');
+    
+    const row = `
+      <tr id="inventory-row-${index}">
+        <td style="border: 1px solid #ddd; padding: 10px; text-align: center;">
+          <div id="inventory-img-${index}" style="width: 50px; height: 50px; background: #f0f0f0; margin: 0 auto; display: flex; align-items: center; justify-content: center; font-size: 0.8em;">...</div>
+        </td>
+        <td style="border: 1px solid #ddd; padding: 10px;">${escapedName}</td>
+        <td style="border: 1px solid #ddd; padding: 10px; text-align: center; font-family: monospace;">#${item.part_num}</td>
+        <td style="border: 1px solid #ddd; padding: 10px;">${escapedCategory}</td>
+        <td style="border: 1px solid #ddd; padding: 10px;">${escapedColorName}</td>
+        <td style="border: 1px solid #ddd; padding: 10px; text-align: center; font-weight: bold;">
+          <span id="inventory-qty-${item.part_num}-${item.color_id}">${item.quantity}</span>
+        </td>
+        <td style="border: 1px solid #ddd; padding: 10px; text-align: center;">
+          <div style="display: flex; gap: 5px; justify-content: center;">
+            <button onclick="changeInventoryQuantityOptimized('${item.part_num}', ${item.color_id}, -1, ${index})"
+                    style="background: #f44336; color: white; border: none; width: 25px; height: 25px; border-radius: 50%; cursor: pointer; font-size: 0.8em;">-</button>
+            <button onclick="changeInventoryQuantityOptimized('${item.part_num}', ${item.color_id}, 1, ${index})"
+                    style="background: #4caf50; color: white; border: none; width: 25px; height: 25px; border-radius: 50%; cursor: pointer; font-size: 0.8em;">+</button>
+          </div>
+        </td>
+        <td style="border: 1px solid #ddd; padding: 8px; text-align: center; max-width: 150px;">
+          ${missingInSets.length > 0 ? 
+            missingInSets.map(set => `
+              <div style="margin-bottom: 8px; padding: 5px; background: #fff3e0; border-radius: 3px; display: flex; align-items: center; gap: 8px;">
+                <div id="set-img-${set.setNumber}-${index}" style="width: 30px; height: 30px; background: #f0f0f0; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.6em; flex-shrink: 0;">...</div>
+                <div style="flex: 1; text-align: left;">
+                  <div style="font-size: 0.75em; font-weight: bold;">${set.setNumber}</div>
+                  <div style="font-size: 0.7em; color: #d84315;">${set.missing} manquant${set.missing > 1 ? 's' : ''}</div>
+                </div>
+              </div>
+            `).join('') 
+            : '<span style="color: #888; font-size: 0.8em;">Aucun</span>'
+          }
+        </td>
+        <td style="border: 1px solid #ddd; padding: 8px; text-align: center; max-width: 120px;">
+          ${missingInSets.length > 0 ? 
+            missingInSets.map(set => `
+              <div style="margin-bottom: 8px; padding: 5px; background: #e3f2fd; border-radius: 3px;">
+                <div style="font-size: 0.7em; color: #666; margin-bottom: 3px;">${set.setNumber}</div>
+                <div style="display: flex; gap: 3px; justify-content: center;">
+                  <button onclick="transferToSetOptimized('${item.part_num}', ${item.color_id}, '${set.setNumber}', -1, ${index})" 
+                          title="Retirer du set (remet dans inventaire)"
+                          style="background: #ff9800; color: white; border: none; width: 22px; height: 22px; border-radius: 50%; cursor: pointer; font-size: 0.7em;">-</button>
+                  <button onclick="transferToSetOptimized('${item.part_num}', ${item.color_id}, '${set.setNumber}', 1, ${index})"
+                          title="Transférer vers le set" 
+                          style="background: #4caf50; color: white; border: none; width: 22px; height: 22px; border-radius: 50%; cursor: pointer; font-size: 0.7em;">+</button>
+                </div>
+              </div>
+            `).join('') 
+            : '<span style="color: #888; font-size: 0.8em;">-</span>'
+          }
+        </td>
+        <td id="rare-part-${index}" style="border: 1px solid #ddd; padding: 8px; text-align: center; max-width: 150px;">
+          <div class="spinner-border spinner-border-sm" role="status"></div>
+        </td>
+        <td id="possible-set-${index}" style="border: 1px solid #ddd; padding: 8px; text-align: center; max-width: 150px;">
+          <div class="spinner-border spinner-border-sm" role="status"></div>
+        </td>
+      </tr>
+    `;
+    
+    rows.push(row);
+  }
+  
+  // Attendre l'analyse et mettre à jour les colonnes
+  analysisPromise.then(async ({ rareParts, possibleNewSets }) => {
+    for (let index = 0; index < uniqueInventory.length; index++) {
+      const item = uniqueInventory[index];
+      const key = `${item.part_num}_${item.color_id}`;
+      
+      // Mettre à jour la colonne "Pièce rare"
+const rareCell = document.getElementById(`rare-part-${index}`);
+      const rarePart = Array.isArray(rareParts) 
+        ? rareParts.find(rp => rp.part_num === item.part_num && rp.color_id === item.color_id)
+        : null; // AJOUT DE CETTE VÉRIFICATION
+
+if (rarePart && rareCell) {
+  const setsHtml = await Promise.all(rarePart.sets.map(async setId => {
+    const setName = await getSetName(setId);
+    return `
+      <div style="margin-bottom: 8px; padding: 5px; background: #fff3cd; border-radius: 3px; display: flex; align-items: center; gap: 8px; border: 1px solid #ffc107; cursor: pointer;"
+           onclick="showRareSetDetail('${setId}')">
+        <div id="rare-set-img-${setId}-${index}" style="width: 30px; height: 30px; background: #f0f0f0; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.6em; flex-shrink: 0;">
+          <div class="spinner-border spinner-border-sm" role="status"></div>
+        </div>
+        <div style="flex: 1; text-align: left;">
+          <div style="font-size: 0.75em; font-weight: bold;">${setId}</div>
+          <div style="font-size: 0.7em; color: #856404;">${setName}</div>
+        </div>
+        <i class="bi bi-search" style="color: #856404;"></i>
+      </div>
+    `;
+  }));
+  
+  rareCell.innerHTML = setsHtml.join('');
+  
+  // Charger les images des sets
+  for (const setId of rarePart.sets) {
+    loadSetMiniatureLazy(setId, `rare-set-img-${setId}-${index}`);
+  }
+} else if (rareCell) {
+  rareCell.innerHTML = '<span style="color: #888; font-size: 0.8em;">-</span>';
+}
+      
+      // Mettre à jour la colonne "Nouveau set possible ?"
+      const possibleCell = document.getElementById(`possible-set-${index}`);
+      
+      // Trouver tous les sets possibles contenant cette pièce
+const relevantSets = Array.isArray(possibleNewSets) 
+  ? possibleNewSets.filter(ps => ps.parts && ps.parts.includes(key))
+  : [];
+      
+      if (relevantSets.length > 0 && possibleCell) {
+        const setsHtml = await Promise.all(relevantSets.map(async ps => {
+          const setName = await getSetName(ps.setId);
+              // AJOUT: Récupérer le nombre total de pièces du set
+    const setInfo = await db.getSetInfo(ps.setId);
+    const totalPieces = setInfo ? setInfo.num_parts : 'N/A';
+          return `
+      <div style="margin-bottom: 8px; padding: 5px; background: #d1ecf1; border-radius: 3px; display: flex; align-items: center; gap: 8px; border: 1px solid #17a2b8; cursor: pointer;"
+     onclick="showAddSetConfirmation('${ps.setId}', '${setName}', ${ps.weightedPercentage.toFixed(1)}, ${ps.count}, ${ps.total}, ${totalPieces})">
+  <div id="possible-set-img-${ps.setId}-${index}" style="width: 30px; height: 30px; background: #f0f0f0; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.6em; flex-shrink: 0;">
+    <div class="spinner-border spinner-border-sm" role="status"></div>
+  </div>
+  <div style="flex: 1; text-align: left;">
+    <div style="font-size: 0.75em; font-weight: bold;">${ps.setId}</div>
+    <div style="font-size: 0.7em; color: #0c5460;">${setName}</div>
+    <div style="font-size: 0.65em; color: #17a2b8; font-weight: bold;">
+      🎯 ${ps.weightedPercentage.toFixed(1)}% pondéré
+    </div>
+    <div style="font-size: 0.6em; color: #666;">
+      📊 ${ps.simplePercentage.toFixed(1)}% types (${ps.count}/${ps.total})
+    </div>
+    ${totalPieces !== 'N/A' ? 
+      `<div style="font-size: 0.6em; color: #666;">${totalPieces} pièces total</div>` : ''}
+  </div>
+</div>
+    `;
+        }));
+        
+        possibleCell.innerHTML = setsHtml.join('');
+        
+        // Charger les images des sets
+        for (const ps of relevantSets) {
+          loadSetMiniatureLazy(ps.setId, `possible-set-img-${ps.setId}-${index}`);
+        }
+      } else if (possibleCell) {
+        possibleCell.innerHTML = '<span style="color: #888; font-size: 0.8em;">-</span>';
+      }
+    }
+  }).catch(error => {
+    console.error('Erreur lors de la mise à jour des colonnes:', error);
+  });
+  
+  return rows.join('');
+}
+
+// Fonction pour afficher le détail d'un set rare avec option d'ajout
+async function showRareSetDetail(setId) {
+  const popup = document.createElement('div');
+  popup.id = 'rare-set-popup';
+  popup.style.cssText = `
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.8); z-index: 1000; display: flex;
+    align-items: center; justify-content: center;
+  `;
+  
+  const content = document.createElement('div');
+  content.style.cssText = `
+    background: white; border-radius: 10px; padding: 30px; max-width: 500px;
+    width: 90%;
+  `;
+  
+  // Récupérer les informations complètes du set
+  const setInfo = await db.getSetInfo(setId);
+  const setName = setInfo ? setInfo.name : await getSetName(setId);
+  const actualTotalPieces = setInfo ? setInfo.num_parts : 'N/A';
+  
+  content.innerHTML = `
+    <div style="text-align: center;">
+      <h3 style="margin-bottom: 20px; color: #856404;">🔍 Set Rare Détecté</h3>
+      <div id="popup-rare-set-image" style="margin: 20px auto; width: 150px; height: 150px; display: flex; align-items: center; justify-content: center; background: #f0f0f0; border-radius: 8px;">
+        <div class="spinner-border" role="status"></div>
+      </div>
+      <h4 style="margin: 15px 0;">${setName}</h4>
+      <p style="color: #666; margin: 10px 0;">#${setId}</p>
+      <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin: 20px 0; border: 2px solid #ffc107;">
+        <div style="font-size: 1em; font-weight: bold; color: #856404; margin-bottom: 10px;">
+          📦 Set contenant des pièces rares
+        </div>
+        <div style="color: #666; font-size: 0.9em;">
+          Total pièces dans le set: <strong>${actualTotalPieces}</strong>
+        </div>
+        ${setInfo && setInfo.year ? `
+          <div style="color: #666; font-size: 0.9em;">
+            Année: <strong>${setInfo.year}</strong>
+          </div>
+        ` : ''}
+      </div>
+      <div style="background: #e3f2fd; padding: 12px; border-radius: 5px; margin: 15px 0;">
+        <p style="margin: 0; font-size: 0.9em; color: #1976d2;">
+          💡 Ce set contient des pièces que vous possédez et qui sont rares (présentes dans moins de 5 sets)
+        </p>
+      </div>
+      <div style="display: flex; gap: 15px; justify-content: center; margin-top: 20px;">
+        <button onclick="closeRareSetPopup()" style="background: #6c757d; color: white; border: none; padding: 12px 24px; border-radius: 5px; cursor: pointer; font-size: 1em;">
+          Fermer
+        </button>
+        <button onclick="confirmAddRareSet('${setId}')" style="background: #ffc107; color: #000; border: none; padding: 12px 24px; border-radius: 5px; cursor: pointer; font-size: 1em; font-weight: bold;">
+          ⭐ Ajouter ce set rare
+        </button>
+      </div>
+    </div>
+  `;
+  
+  popup.appendChild(content);
+  document.body.appendChild(popup);
+  
+  // Charger l'image du set
+  const imgContainer = document.getElementById('popup-rare-set-image');
+  if (setInfo && setInfo.img_url) {
+    imgContainer.innerHTML = `<img src="${setInfo.img_url}" alt="${setName}" style="max-width: 150px; max-height: 150px; object-fit: contain;">`;
+  } else {
+    imgContainer.innerHTML = `
+      <div style="width: 150px; height: 150px; background: #f8f9fa; border: 2px dashed #dee2e6; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 0.8em; color: #666;">
+        <i class="bi bi-box" style="font-size: 2em;"></i>
+        <div>Image non disponible</div>
+      </div>
+    `;
+  }
+  
+  // Fermer en cliquant à l'extérieur
+  popup.addEventListener('click', (e) => {
+    if (e.target === popup) {
+      closeRareSetPopup();
+    }
+  });
+}
+
+function closeRareSetPopup() {
+  const popup = document.getElementById('rare-set-popup');
+  if (popup) {
+    popup.remove();
+  }
+}
+
+// Fonction pour confirmer l'ajout du set rare (identique à confirmAddSet)
+async function confirmAddRareSet(setId) {
+  closeRareSetPopup();
+  // Réutiliser la fonction existante
+  await confirmAddSet(setId);
+}
+
+// AJOUTER fonction pour obtenir le nom d'un set
+async function getSetName(setId) {
+  const setInfo = await db.getSetByNum(setId);
+  return setInfo ? setInfo.name : `Set ${setId}`;
+}
+
+// Fonction pour transférer une pièce de l'inventaire vers un set (CORRIGÉE)
+async function transferToSetOptimized(partNum, colorId, setNumber, delta, rowIndex) {
+  try {
+    debug(`Transfert: ${partNum}, couleur ${colorId}, set ${setNumber}, delta ${delta}`);
+    
+    // Trouver l'item dans l'inventaire unifié par color_id
+    const inventoryItem = unifiedDataManager.currentData.inventory.find(
+      item => item.part_num === partNum && item.color_id == colorId
+    );
+    
+    if (!inventoryItem) {
+      showToast('Pièce non trouvée dans l\'inventaire', 'error');
+      return;
+    }
+    
+    // Trouver le set et la pièce dans le set
+    const set = unifiedDataManager.currentData.sets.find(s => s.number === setNumber);
+    if (!set) {
+      showToast('Set non trouvé', 'error');
+      return;
+    }
+    
+    const setPart = set.parts.find(p => p.part_num === partNum && p.color_id == colorId);
+    if (!setPart) {
+      showToast('Pièce non trouvée dans le set', 'error');
+      return;
+    }
+    
+    const currentInventoryQty = inventoryItem.quantity;
+    const currentSetQty = setPart.quantity_owned || 0;
+    
+    // Vérifications selon le type de transfert
+    if (delta > 0) {
+      // Transfert INVENTAIRE → SET : vérifier qu'on a assez en inventaire
+      if (currentInventoryQty <= 0) {
+        showToast('Quantité insuffisante dans l\'inventaire', 'error');
+        return;
+      }
+      // Vérifier qu'on ne dépasse pas la quantité nécessaire dans le set
+      if (currentSetQty >= setPart.quantity) {
+        showToast('Set déjà complet pour cette pièce', 'info');
+        return;
+      }
+    } else {
+      // Transfert SET → INVENTAIRE : vérifier qu'on peut retirer du set
+      if (currentSetQty <= 0) {
+        showToast('Aucune pièce à retirer du set', 'error');
+        return;
+      }
+    }
+    
+    // Calculer les nouvelles quantités
+    const newInventoryQty = Math.max(0, currentInventoryQty - delta);
+    const newSetQty = Math.max(0, Math.min(currentSetQty + delta, setPart.quantity));
+    
+    debug(`Avant: inventaire=${currentInventoryQty}, set=${currentSetQty}`);
+    debug(`Après: inventaire=${newInventoryQty}, set=${newSetQty}`);
+    
+    // 1. Modifier la quantité dans l'inventaire unifié
+    unifiedDataManager.updateInventory(
+      partNum, 
+      colorId, 
+      inventoryItem.color_name, 
+      newInventoryQty, 
+      inventoryItem.category
+    );
+    
+    // 2. Modifier la quantité dans le set (format unifié)
+    setPart.quantity_owned = newSetQty;
+    
+    // Sauvegarder
+    await unifiedDataManager.saveUnifiedData();
+    
+    // 3. Mettre à jour l'affichage de la quantité d'inventaire
+    const qtyElement = document.getElementById(`inventory-qty-${partNum}-${colorId}`);
+    if (qtyElement) {
+      qtyElement.textContent = newInventoryQty;
+      
+      // Animation pour feedback visuel
+      qtyElement.style.backgroundColor = delta > 0 ? '#ff9800' : '#2196f3';
+      qtyElement.style.color = 'white';
+      qtyElement.style.transition = 'all 0.3s ease';
+      
+      setTimeout(() => {
+        qtyElement.style.backgroundColor = '';
+        qtyElement.style.color = '';
+      }, 500);
+    }
+    
+    // 4. Calculer le nouveau nombre manquant
+    const newMissing = setPart.quantity - newSetQty;
+    
+    if (delta > 0) {
+      showToast(`Pièce transférée au set ${setNumber} (${newMissing} manquant(s))`, 'success');
+    } else {
+      showToast(`Pièce retirée du set ${setNumber} (${newMissing} manquant(s))`, 'info');
+    }
+    
+    // 5. Mettre à jour l'affichage des informations de manquant
+    updateMissingInfoDisplay(partNum, colorId, setNumber, rowIndex);
+    
+  } catch (error) {
+    console.error('Erreur transfert vers set:', error);
+    showToast('Erreur lors du transfert', 'error');
+  }
+}
+
+// Fonction optimisée pour charger les images d'inventaire
+async function loadInventoryImageOptimized(partNum, colorId, index) {
+  try {
+    const inventoryParts = await db.getDataByIndex('inventory_parts', 'part_num', partNum);
+    const allColors = await db.getData('colors');
+    
+    let imageUrl = '';
+    
+    // Rechercher d'abord l'image spécifique à la couleur (y compris colorId = 0)
+    if (inventoryParts.length > 0) {
+      // Priorité 1: Image spécifique à la couleur demandée
+      let inventoryItem = inventoryParts.find(item => item.color_id === colorId);
+      
+      // Priorité 2: Si pas trouvé, prendre la première image disponible pour cette pièce
+      if (!inventoryItem && inventoryParts.length > 0) {
+        inventoryItem = inventoryParts[0];
+      }
+      
+      if (inventoryItem && inventoryItem.img_url) {
+        const isValidImage = await testImageUrl(inventoryItem.img_url);
+        if (isValidImage) {
+          imageUrl = inventoryItem.img_url;
+        }
+      }
+    }
+    
+    // Fallback vers l'URL générique si aucune image spécifique trouvée
+    if (!imageUrl) {
+      imageUrl = `https://cdn.rebrickable.com/media/parts/elements/${partNum}.jpg`;
+    }
+    
+    const imgContainer = document.getElementById(`inventory-img-${index}`);
+    if (imgContainer) {
+      const img = new Image();
+      img.onload = () => {
+        imgContainer.innerHTML = `<img src="${imageUrl}" alt="${partNum}" style="width: 50px; height: 50px; object-fit: contain;">`;
+      };
+      img.onerror = () => {
+        // Fallback ultime
+        imgContainer.innerHTML = `<div style="width: 50px; height: 50px; background: #f0f0f0; border: 1px solid #ddd; display: flex; align-items: center; justify-content: center; font-size: 0.7em;">📦</div>`;
+      };
+      img.src = imageUrl;
+    }
+  } catch (error) {
+    console.error('Erreur chargement image inventaire:', error);
+    const imgContainer = document.getElementById(`inventory-img-${index}`);
+    if (imgContainer) {
+      imgContainer.innerHTML = `<div style="width: 50px; height: 50px; background: #f0f0f0; border: 1px solid #ddd; display: flex; align-items: center; justify-content: center; font-size: 0.7em;">❌</div>`;
+    }
+  }
+}
+
+// Fonction optimisée pour changer la quantité sans recharger toute la page
+async function changeInventoryQuantityOptimized(partNum, colorId, delta, rowIndex) {
+  try {
+    const inventoryItem = unifiedDataManager.currentData.inventory.find(
+      item => item.part_num === partNum && item.color_id == colorId
+    );
+    
+    if (!inventoryItem) {
+      showToast('Pièce non trouvée dans l\'inventaire', 'error');
+      return;
+    }
+    
+    const currentQty = inventoryItem.quantity;
+    const newQty = Math.max(0, currentQty + delta);
+    
+    unifiedDataManager.updateInventory(
+      partNum, 
+      colorId, 
+      inventoryItem.color_name, 
+      newQty, 
+      inventoryItem.category
+    );
+    
+    // INVALIDER le cache d'analyse
+    unifiedDataManager.currentData.analysisCache.lastInventoryHash = null;
+    
+    await unifiedDataManager.saveUnifiedData();
+    
+    // Mise à jour visuelle uniquement
+    const qtyElement = document.getElementById(`inventory-qty-${partNum}-${colorId}`);
+    if (qtyElement) {
+      qtyElement.textContent = newQty;
+      qtyElement.style.backgroundColor = '#4caf50';
+      qtyElement.style.color = 'white';
+      qtyElement.style.transition = 'all 0.3s ease';
+      
+      setTimeout(() => {
+        qtyElement.style.backgroundColor = '';
+        qtyElement.style.color = '';
+      }, 500);
+    }
+    
+    if (newQty === 0) {
+      const row = document.getElementById(`inventory-row-${rowIndex}`);
+      if (row) {
+        row.style.opacity = '0.5';
+        setTimeout(() => showPersonalInventory(), 1000);
+      }
+    }
+    
+    showToast(`Quantité ${delta > 0 ? 'augmentée' : 'diminuée'}: ${newQty}`, 'success', 1500);
+    
+  } catch (error) {
+    console.error('Erreur changement quantité:', error);
+    showToast('Erreur lors de la modification', 'error');
+  }
+}
+
+// Fonction optimisée pour le transfert vers un set
+// Remplacer le contenu de la fonction transferToSetOptimized existante
+async function transferToSetOptimized(partNum, colorId, setNumber, delta, rowIndex) {
+  try {
+    if (delta > 0) {
+      // Transférer DE l'inventaire VERS le set
+      const success = await unifiedDataManager.transferPartToSet(partNum, colorId, setNumber, delta);
+      if (success) {
+        showToast(`${delta} pièce(s) transférée(s) vers le set ${setNumber}`, 'success');
+      }
+    } else {
+      // Retirer DU set VERS l'inventaire
+      const set = unifiedDataManager.currentData.sets.find(s => s.number === setNumber);
+      if (set) {
+        const part = set.parts.find(p => p.part_num === partNum && p.color_id === colorId);
+        if (part && part.quantity_owned > 0) {
+          part.quantity_owned = Math.max(0, part.quantity_owned + delta);
+          
+          const currentInventoryQty = unifiedDataManager.getInventoryQuantity(partNum, colorId);
+          const inventoryItem = unifiedDataManager.currentData.inventory.find(
+            item => item.part_num === partNum && item.color_id === colorId
+          );
+          
+          if (inventoryItem) {
+            unifiedDataManager.updateInventory(
+              partNum, 
+              colorId, 
+              inventoryItem.color_name, 
+              currentInventoryQty - delta,
+              inventoryItem.category
+            );
+          }
+          
+          // INVALIDER le cache d'analyse
+          unifiedDataManager.currentData.analysisCache.lastInventoryHash = null;
+
+
+          await unifiedDataManager.saveUnifiedData();
+          showToast(`${-delta} pièce(s) retirée(s) du set ${setNumber}`, 'success');
+        } else {
+          showToast('Aucune pièce à retirer du set', 'error');
+          return;
+        }
+      }
+    }
+    
+    // Utiliser le nom de fonction existant
+    updateMissingInfoDisplay(partNum, colorId, setNumber, rowIndex);
+    
+  } catch (error) {
+    console.error('Erreur transfert:', error);
+    showToast('Erreur lors du transfert: ' + error.message, 'error');
+  }
+}
+
+// Fonction pour mettre à jour l'affichage des informations de manquant
+// Remplacer le contenu de la fonction updateMissingInfoDisplay existante
+function updateMissingInfoDisplay(partNum, colorId, setNumber, rowIndex) {
+  const availableQty = unifiedDataManager.getInventoryQuantity(partNum, colorId);
+  
+  // Mettre à jour la quantité d'inventaire affichée
+  const qtyElement = document.getElementById(`inventory-qty-${partNum}-${colorId}`);
+  if (qtyElement) {
+    qtyElement.textContent = availableQty;
+  }
+  
+  // Recalculer les informations de pièces manquantes
+  const missingPartsInfo = getMissingPartsInfo();
+  const key = `${partNum}_${colorId}`;
+  const missingInSets = missingPartsInfo[key] ? missingPartsInfo[key].sets : [];
+  
+  // Debug pour ce set spécifique
+  const currentSetInfo = missingInSets.find(s => s.setNumber === setNumber);
+  if (currentSetInfo) {
+    debug(`Debug pour ${partNum}-${colorId} dans set ${setNumber}:`);
+    debug(`- availableQty (inventaire): ${availableQty}`);
+    debug(`- currentSetInfo.owned (dans le set): ${currentSetInfo.owned}`);
+    debug(`- currentSetInfo.missing: ${currentSetInfo.missing}`);
+  }
+  
+  // Mettre à jour la cellule "Manquant dans"
+  const missingCell = document.querySelector(`#inventory-row-${rowIndex} td:nth-child(8)`);
+  if (missingCell) {
+    missingCell.innerHTML = missingInSets.length > 0 ? 
+      missingInSets.map(set => `
+        <div style="margin-bottom: 8px; padding: 5px; background: #fff3e0; border-radius: 3px; display: flex; align-items: center; gap: 8px;">
+          <div id="set-img-${set.setNumber}-${rowIndex}" style="width: 30px; height: 30px; background: #f0f0f0; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.6em; flex-shrink: 0;">...</div>
+          <div style="flex: 1; text-align: left;">
+            <div style="font-size: 0.75em; font-weight: bold;">${set.setNumber}</div>
+            <div style="font-size: 0.7em; color: #d84315;">${set.missing} manquant${set.missing > 1 ? 's' : ''}</div>
+          </div>
+        </div>
+      `).join('') 
+      : '<span style="color: #888; font-size: 0.8em;">Aucun</span>';
+    
+    // Recharger les miniatures
+    for (const set of missingInSets) {
+      loadSetMiniatureLazy(set.setNumber, rowIndex);
+    }
+  }
+  
+  // Mettre à jour la cellule "Transférer"
+  const transferCell = document.querySelector(`#inventory-row-${rowIndex} td:nth-child(9)`);
+  if (transferCell) {
+    transferCell.innerHTML = missingInSets.length > 0 ? 
+      missingInSets.map(setInfo => {
+        const canTransferToSet = availableQty > 0 && setInfo.missing > 0;
+        const canRemoveFromSet = setInfo.owned > 0;
+        
+        // Debug pour chaque bouton
+        debug(`Boutons pour set ${setInfo.setNumber}: + enabled=${canTransferToSet}, - enabled=${canRemoveFromSet}`);
+        
+        return `
+          <div style="margin-bottom: 8px; padding: 5px; background: #e3f2fd; border-radius: 3px;">
+            <div style="font-size: 0.7em; color: #666; margin-bottom: 3px;">${setInfo.setNumber}</div>
+            <div style="display: flex; gap: 3px; justify-content: center;">
+              <button onclick="transferToSetOptimized('${partNum}', ${colorId}, '${setInfo.setNumber}', -1, ${rowIndex})" 
+                      title="Retirer du set"
+                      ${!canRemoveFromSet ? 'disabled' : ''}
+                      style="background: ${canRemoveFromSet ? '#ff9800' : '#ccc'}; color: white; border: none; width: 22px; height: 22px; border-radius: 50%; cursor: ${canRemoveFromSet ? 'pointer' : 'not-allowed'}; font-size: 0.7em;">-</button>
+              <button onclick="transferToSetOptimized('${partNum}', ${colorId}, '${setInfo.setNumber}', 1, ${rowIndex})"
+                      title="Transférer vers le set" 
+                      ${!canTransferToSet ? 'disabled' : ''}
+                      style="background: ${canTransferToSet ? '#4caf50' : '#ccc'}; color: white; border: none; width: 22px; height: 22px; border-radius: 50%; cursor: ${canTransferToSet ? 'pointer' : 'not-allowed'}; font-size: 0.7em;">+</button>
+            </div>
+          </div>
+        `;
+      }).join('') 
+      : '<span style="color: #888; font-size: 0.8em;">-</span>';
+  }
+}
+
+// NOUVEAU : Fonction de lazy loading pour les miniatures de sets
+function loadSetMiniatureLazy(setNumber, containerId) {
+  window.setImageLoadQueue.push({ setNumber, containerId });
+  
+  if (!window.setImageLoadInProgress) {
+    processSetImageQueue();
+  }
+}
+
+// NOUVEAU : Traiter la file d'attente progressivement
+async function processSetImageQueue() {
+  if (window.setImageLoadQueue.length === 0) {
+    window.setImageLoadInProgress = false;
+    return;
+  }
+  
+  window.setImageLoadInProgress = true;
+  const { setNumber, containerId } = window.setImageLoadQueue.shift();
+  
+  try {
+    await loadSetImageOptimized(setNumber, containerId);
+  } catch (error) {
+    console.error(`Erreur chargement image ${setNumber}:`, error);
+  }
+  
+  const delay = window.setImageLoadQueue.length > 20 ? 50 : 100;
+  setTimeout(processSetImageQueue, delay);
+}
+
+// NOUVELLE fonction optimisée qui utilise sets.csv
+async function loadSetImageOptimized(setNumber, containerId) {
+  const imgContainer = document.getElementById(containerId);
+  if (!imgContainer) return;
+
+    // AJOUT : Convertir inventory_id en set_num si nécessaire
+  let realSetNum = setNumber;
+
+    // Si c'est un nombre sans tiret, c'est probablement un inventory_id
+  if (!String(setNumber).includes('-') && unifiedDataManager) {
+    realSetNum = unifiedDataManager.getSetNumFromInventory(setNumber);
+    if (!realSetNum) {
+      console.warn(`Impossible de convertir inventory_id ${setNumber} en set_num`);
+      imgContainer.innerHTML = `
+        <div style="width: 30px; height: 30px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.6em; color: #856404;">
+          <i class="bi bi-exclamation-triangle"></i>
+        </div>
+      `;
+      return;
+    }
+  }
+
+  const cacheKey = `set_${setNumber}`;
+  
+  // Vérifier le cache
+  if (window.setImageCache && window.setImageCache.has(cacheKey)) {
+    const cachedUrl = window.setImageCache.get(cacheKey);
+    imgContainer.innerHTML = `<img src="${cachedUrl}" alt="Set ${realSetNum}" 
+      style="width: 30px; height: 30px; object-fit: contain; border-radius: 3px;">`;
+    return;
+  }
+
+  try {
+    // 1. PRIORITÉ : sets.csv
+    const setInfo = await db.getSetByNum(realSetNum);
+    if (setInfo && setInfo.img_url) {
+      const imageExists = await testImageUrl(setInfo.img_url);
+      if (imageExists) {
+        imgContainer.innerHTML = `<img src="${setInfo.img_url}" alt="${setInfo.name}" 
+          style="width: 30px; height: 30px; object-fit: contain; border-radius: 3px;">`;
+        window.setImageCache.set(cacheKey, setInfo.img_url);
+        return;
+      }
+    }
+
+    // 2. Fallbacks CDN
+    const fallbackUrls = [
+      `https://cdn.rebrickable.com/media/sets/${realSetNum}.jpg`,
+      `https://cdn.rebrickable.com/media/sets/${realSetNum.replace('-1', '')}-1.jpg`,
+    ];
+
+    for (const url of fallbackUrls) {
+      const imageExists = await testImageUrl(url);
+      if (imageExists) {
+        imgContainer.innerHTML = `<img src="${url}" alt="Set ${realSetNum}" 
+          style="width: 30px; height: 30px; object-fit: contain; border-radius: 3px;">`;
+        window.setImageCache.set(cacheKey, url);
+        return;
+      }
+    }
+
+    // 3. API en dernier recours (seulement si on a une clé API)
+    const apiKey = localStorage.getItem('rebrickable_api_key');
+    if (apiKey) {
+      const response = await fetch(`https://rebrickable.com/api/v3/lego/sets/${realSetNum}/`, {
+        headers: { 'Authorization': `key ${apiKey}` }
+      });
+      
+      if (response.ok) {
+        const setData = await response.json();
+        if (setData.set_img_url) {
+          const imageExists = await testImageUrl(setData.set_img_url);
+          if (imageExists) {
+            imgContainer.innerHTML = `<img src="${setData.set_img_url}" alt="Set ${realSetNum}" 
+              style="width: 30px; height: 30px; object-fit: contain; border-radius: 3px;">`;
+            window.setImageCache.set(cacheKey, setData.set_img_url);
+            return;
+          }
+        }
+      }
+    }
+
+  } catch (error) {
+    console.error('Erreur chargement image set:', error);
+  }
+
+  // Placeholder final
+  imgContainer.innerHTML = `
+    <div style="width: 30px; height: 30px; background: #f0f0f0; border: 1px dashed #ddd; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.6em; color: #666;">
+      📦
+    </div>
+  `;
+}
+
+// Ajouter la fonction testImageUrl si elle n'existe pas déjà dans app.html
+function testImageUrl(url) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = url;
+    setTimeout(() => resolve(false), 5000);
+  });
+}
+
+// AJOUTER fonction pour afficher la popup de confirmation d'ajout de set
+async function showAddSetConfirmation(setId, setName, percentage, ownedTypes, totalTypes, totalPieces) {
+  const popup = document.createElement('div');
+  popup.id = 'add-set-popup';
+  popup.style.cssText = `
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.8); z-index: 1000; display: flex;
+    align-items: center; justify-content: center;
+  `;
+  
+  const content = document.createElement('div');
+  content.style.cssText = `
+    background: white; border-radius: 10px; padding: 30px; max-width: 500px;
+    width: 90%;
+  `;
+  
+  // Récupérer les informations complètes du set
+  const setInfo = await db.getSetInfo(setId);
+  const actualTotalPieces = setInfo ? setInfo.num_parts : totalPieces;
+  
+  content.innerHTML = `
+    <div style="text-align: center;">
+      <h3 style="margin-bottom: 20px;">Ajouter ce set ?</h3>
+      <div id="popup-set-image" style="margin: 20px auto; width: 150px; height: 150px; display: flex; align-items: center; justify-content: center; background: #f0f0f0; border-radius: 8px;">
+        <div class="spinner-border" role="status"></div>
+      </div>
+      <h4 style="margin: 15px 0;">${setName}</h4>
+      <p style="color: #666; margin: 10px 0;">#${setId}</p>
+      <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 20px 0;">
+        <div style="font-size: 1.2em; font-weight: bold; color: #1976d2; margin-bottom: 10px;">
+          ${percentage}% de types de pièces disponibles
+        </div>
+        <div style="color: #666; margin-bottom: 5px;">
+          Vous possédez <strong>${ownedTypes}</strong> types de pièces sur <strong>${totalTypes}</strong> types uniques
+        </div>
+        <div style="color: #666; font-size: 0.9em;">
+          Total pièces dans le set: <strong>${actualTotalPieces}</strong>
+        </div>
+        ${setInfo && setInfo.year ? `
+          <div style="color: #666; font-size: 0.9em;">
+            Année: <strong>${setInfo.year}</strong>
+          </div>
+        ` : ''}
+      </div>
+      <div style="display: flex; gap: 15px; justify-content: center; margin-top: 20px;">
+        <button onclick="closeAddSetPopup()" style="background: #6c757d; color: white; border: none; padding: 12px 24px; border-radius: 5px; cursor: pointer; font-size: 1em;">
+          Annuler
+        </button>
+        <button onclick="confirmAddSet('${setId}')" style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 5px; cursor: pointer; font-size: 1em;">
+          Ajouter le set
+        </button>
+      </div>
+    </div>
+  `;
+  
+  popup.appendChild(content);
+  document.body.appendChild(popup);
+  
+  // Charger l'image du set
+  const imgContainer = document.getElementById('popup-set-image');
+  // ... reste du code de chargement d'image ...
+  
+  // Fermer en cliquant à l'extérieur
+  popup.addEventListener('click', (e) => {
+    if (e.target === popup) {
+      closeAddSetPopup();
+    }
+  });
+}
+
+function closeAddSetPopup() {
+  const popup = document.getElementById('add-set-popup');
+  if (popup) {
+    popup.remove();
+  }
+}
+
+// AJOUTER fonction pour confirmer l'ajout du set
+async function confirmAddSet(setId) {
+  try {
+    closeAddSetPopup();
+    showToast('Récupération des informations du set...', 'info');
+    
+    // Vérifier que setManager existe (on est sur app.html, pas sets.html)
+    // On va donc ajouter directement dans unifiedDataManager
+    
+    // Récupérer les pièces du set depuis IndexedDB
+    const allInventoryParts = await db.getData('inventory_parts');
+    const setInventoryParts = allInventoryParts.filter(ip => ip.inventory_id === setId);
+    
+    if (setInventoryParts.length === 0) {
+      showToast('Aucune pièce trouvée pour ce set', 'error');
+      return;
+    }
+    
+    // Créer la structure du set
+    const uniqueParts = new Map();
+    for (const invPart of setInventoryParts) {
+      const key = `${invPart.part_num}_${invPart.color_id}`;
+      if (!uniqueParts.has(key)) {
+        uniqueParts.set(key, {
+          part_num: invPart.part_num,
+          color_id: invPart.color_id,
+          quantity: 1,
+          quantity_owned: 0
+        });
+      } else {
+        uniqueParts.get(key).quantity++;
+      }
+    }
+    
+    // Récupérer le nom du set
+    const setName = await getSetName(setId);
+    
+    // Ajouter au gestionnaire unifié
+    const newSet = {
+      number: setId,
+      name: setName,
+      parts: Array.from(uniqueParts.values())
+    };
+    
+    unifiedDataManager.currentData.sets.push(newSet);
+    await unifiedDataManager.saveUnifiedData();
+    
+    showToast(`Set "${setName}" ajouté avec succès ! Rendez-vous sur la page Sets pour le compléter.`, 'success', 5000);
+    
+    // Recharger l'inventaire pour mettre à jour les analyses
+    showPersonalInventory();
+    
+  } catch (error) {
+    console.error('Erreur ajout set:', error);
+    showToast('Erreur lors de l\'ajout du set: ' + error.message, 'error');
+  }
+}
+
+    // Fonction pour retourner à la page d'import
+    function backToFileManager() {
+      navigateTo('menu.html');
+    }
+  </script>
+  <!-- SERVICE WORKER -->
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg => console.log('✅ Service Worker enregistré', reg.scope))
+      .catch(err => console.error('❌ Erreur Service Worker:', err));
+  });
+}
+</script>
+<script src="./install-prompt.js"></script>
+</body>
+</html>

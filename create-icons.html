@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Générateur d'icônes LEGO</title>
+</head>
+<body>
+  <canvas id="canvas192" width="192" height="192"></canvas>
+  <canvas id="canvas512" width="512" height="512"></canvas>
+  
+  <script>
+    function createIcon(size) {
+      const canvas = document.getElementById(`canvas${size}`);
+      const ctx = canvas.getContext('2d');
+      
+      // Fond rouge LEGO
+      ctx.fillStyle = '#d32f2f';
+      ctx.fillRect(0, 0, size, size);
+      
+      // Cercle blanc
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(size/2, size/2, size*0.4, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      // Texte LEGO
+      ctx.fillStyle = '#d32f2f';
+      ctx.font = `bold ${size/4}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('LEGO', size/2, size/2);
+      
+      // Télécharger
+      canvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `icon-${size}.png`;
+        a.click();
+      });
+    }
+    
+    createIcon(192);
+    setTimeout(() => createIcon(512), 1000);
+  </script>
+</body>
+</html>
