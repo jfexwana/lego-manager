@@ -38,28 +38,33 @@
     
     <div id="file-manager" class="file-manager-section">
       <h3>Statut de la base de données LEGO (IndexedDB)</h3>
-      <p>Téléchargement et décompression automatiques depuis Rebrickable, ou import manuel de fichiers CSV.</p>
+      <p>Téléchargez et décompressez automatiquement les fichiers depuis Rebrickable.</p>
       
       <!-- Statut de la base de données -->
       <div style="background: #f0f0f0; padding: 10px; border-radius: 5px; margin: 10px 0; text-align: center;">
         <strong>Base de données :</strong> <span id="db-status">Initialisation...</span>
       </div>
+
+      <!-- Instructions -->
+      <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #2196f3;">
+        <h4 style="margin-top: 0;">📋 Instructions</h4>
+        <ol style="margin-bottom: 0;">
+          <li>Cliquez sur <strong>"📥 Télécharger"</strong> pour chaque fichier</li>
+          <li>Le fichier .gz sera automatiquement décompressé et importé</li>
+          <li>Une fois tous les fichiers chargés, cliquez sur <strong>"▶️ Lancer l'application"</strong></li>
+        </ol>
+      </div>
       
+      <!-- Liste des fichiers avec boutons de téléchargement -->
       <div class="file-status" id="file-status">
         <!-- Les statuts des fichiers seront affichés ici -->
       </div>
+
+      <!-- Input caché pour le téléchargement de fichiers .gz -->
+      <input type="file" id="gz-file-input" accept=".gz" style="display: none;">
       
-      <!-- Boutons d'action principaux -->
-      <div style="text-align: center; margin: 20px 0; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">
-        <button class="btn" id="download-all-btn" onclick="downloadAllFiles()">
-          📥 Télécharger depuis Rebrickable
-        </button>
-        <button class="btn" onclick="document.getElementById('file-input').click()">
-          📁 Importer des CSV manuellement
-        </button>
-        <button class="btn btn-warning" onclick="checkForUpdates()">
-          🔄 Vérifier les mises à jour
-        </button>
+      <!-- Boutons d'action -->
+      <div style="text-align: center; margin: 20px 0;">
         <button class="btn" id="launch-app" onclick="launchApp()" disabled>
           ▶️ Lancer l'application
         </button>
@@ -67,60 +72,6 @@
           🗑️ Effacer toutes les données
         </button>
       </div>
-
-      <!-- Barre de progression globale -->
-      <div id="global-progress" style="display: none; margin: 20px 0;">
-        <div style="background: #e0e0e0; border-radius: 10px; overflow: hidden; height: 30px;">
-          <div id="global-progress-bar" style="background: linear-gradient(90deg, #4caf50, #2196f3); height: 100%; width: 0%; transition: width 0.3s; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 0.9em;">
-            0%
-          </div>
-        </div>
-        <div id="global-progress-text" style="text-align: center; margin-top: 10px; font-size: 0.9em; color: #666; font-weight: 500;">
-          Initialisation...
-        </div>
-      </div>
-      
-      <!-- Zone d'upload manuel (cachée par défaut) -->
-      <div class="upload-area" id="upload-area" style="display: none; margin-top: 20px;">
-        <p>Glissez-déposez vos fichiers CSV décompressés ici</p>
-        <input type="file" id="file-input" multiple accept=".csv" style="display: none;">
-        <p><small>Fichiers acceptés : parts.csv, part_categories.csv, inventory_parts.csv, colors.csv, sets.csv, inventories.csv, minifigs.csv, inventory_minifigs.csv</small></p>
-      </div>
-
-      <!-- Instructions détaillées (repliables) -->
-      <details style="margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 8px;">
-        <summary style="cursor: pointer; font-weight: bold; color: #2196f3;">
-          ℹ️ Instructions détaillées
-        </summary>
-        <div class="upload-instructions" style="margin-top: 15px;">
-          <h4>Option 1 : Téléchargement automatique (Recommandé)</h4>
-          <ol>
-            <li>Cliquez sur <strong>"📥 Télécharger depuis Rebrickable"</strong></li>
-            <li>Attendez 5-10 minutes (les fichiers sont téléchargés et décompressés automatiquement)</li>
-            <li>Cliquez sur <strong>"▶️ Lancer l'application"</strong></li>
-          </ol>
-
-          <h4>Option 2 : Import manuel</h4>
-          <ol>
-            <li>Téléchargez les fichiers .gz depuis Rebrickable (liens ci-dessous)</li>
-            <li>Décompressez-les avec 7-Zip, WinRAR ou un outil similaire</li>
-            <li>Cliquez sur <strong>"📁 Importer des CSV manuellement"</strong></li>
-            <li>Sélectionnez les fichiers CSV décompressés</li>
-          </ol>
-
-          <h4>Fichiers requis :</h4>
-          <ul style="font-size: 0.9em;">
-            <li><strong>parts.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/parts.csv.gz" target="_blank">Télécharger</a></li>
-            <li><strong>part_categories.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/part_categories.csv.gz" target="_blank">Télécharger</a></li>
-            <li><strong>inventory_parts.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/inventory_parts.csv.gz" target="_blank">Télécharger</a></li>
-            <li><strong>colors.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/colors.csv.gz" target="_blank">Télécharger</a></li>
-            <li><strong>sets.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/sets.csv.gz" target="_blank">Télécharger</a></li>
-            <li><strong>inventories.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/inventories.csv.gz" target="_blank">Télécharger</a></li>
-            <li><strong>minifigs.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/minifigs.csv.gz" target="_blank">Télécharger</a></li>
-            <li><strong>inventory_minifigs.csv.gz</strong> - <a href="https://cdn.rebrickable.com/media/downloads/inventory_minifigs.csv.gz" target="_blank">Télécharger</a></li>
-          </ul>
-        </div>
-      </details>
     </div>
     
     <!-- Section cachée pour redirection -->
@@ -153,14 +104,14 @@
       csvWorker = window.createCSVWorker();
       
       // Configurer l'interface
-      renderInitialFileStatus();
-      setupFileManager();
+      renderFileList();
+      setupGzFileInput();
       await updateFileStatus();
       
       console.log('Application initialisée');
     };
 
-    function renderInitialFileStatus() {
+    function renderFileList() {
       const statusDiv = document.getElementById('file-status');
       statusDiv.innerHTML = '';
 
@@ -170,10 +121,21 @@
         fileDiv.className = 'file-item missing';
         fileDiv.id = `file-${fileKey}`;
         fileDiv.innerHTML = `
-          <div class="file-name">${file.name}</div>
-          <div class="file-status-text missing">❌ Manquant</div>
-          <div style="font-size: 0.85em; color: #666;">${file.description}</div>
-          <div class="progress-bar" id="progress-${fileKey}" style="display:none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="flex: 1; min-width: 200px;">
+              <div class="file-name" style="font-weight: bold; margin-bottom: 5px;">${file.name}</div>
+              <div class="file-status-text missing" style="font-size: 0.9em;">❌ Manquant</div>
+              <div style="font-size: 0.85em; color: #666;">${file.description}</div>
+            </div>
+            <div style="min-width: 150px; text-align: right;">
+              <button class="btn btn-sm download-btn" 
+                      onclick="downloadFile('${fileKey}')" 
+                      id="download-btn-${fileKey}">
+                📥 Télécharger
+              </button>
+            </div>
+          </div>
+          <div class="progress-bar" id="progress-${fileKey}" style="display:none; margin-top: 10px;">
             <div class="progress-fill" id="progress-fill-${fileKey}"></div>
           </div>
         `;
@@ -181,250 +143,107 @@
       }
     }
 
-    function setupFileManager() {
-      const uploadArea = document.getElementById('upload-area');
-      const fileInput = document.getElementById('file-input');
-      
-      uploadArea.addEventListener('dragover', function(e) {
-        e.preventDefault();
-        uploadArea.classList.add('dragover');
-        uploadArea.style.display = 'block';
-      });
-      
-      uploadArea.addEventListener('dragleave', function(e) {
-        e.preventDefault();
-        uploadArea.classList.remove('dragover');
-      });
-      
-      uploadArea.addEventListener('drop', function(e) {
-        e.preventDefault();
-        uploadArea.classList.remove('dragover');
-        handleFiles(e.dataTransfer.files);
-      });
-      
-      fileInput.addEventListener('change', function(e) {
-        handleFiles(e.target.files);
-      });
-    }
-
-    async function updateFileStatus() {
-      const launchBtn = document.getElementById('launch-app');
-      let allFilesLoaded = true;
-
-      for (const fileKey of Object.keys(REQUIRED_FILES)) {
-        const fileDiv = document.getElementById(`file-${fileKey}`);
-        const count = await db.getTableCount(fileKey);
-        const fileDate = await db.getFileDate(fileKey);
-
-        const isLoaded = count > 0;
-        if (!isLoaded) allFilesLoaded = false;
-
-        const fileDateText = fileDate ? new Date(fileDate).toLocaleDateString() : 'Date inconnue';
-
-        fileDiv.className = `file-item ${isLoaded ? 'loaded' : 'missing'}`;
-        fileDiv.querySelector('.file-status-text').textContent = isLoaded ? '✅ Chargé' : '❌ Manquant';
-        fileDiv.querySelector('.file-status-text').className = `file-status-text ${isLoaded ? 'loaded' : 'missing'}`;
-
-        if (isLoaded) {
-          const existingButtons = fileDiv.querySelectorAll('.btn-danger, .update-button');
-          existingButtons.forEach(btn => btn.remove());
-          
-          const countDiv = fileDiv.querySelector('.file-count');
-          if (!countDiv) {
-            fileDiv.innerHTML += `
-              <div class="file-count">${count.toLocaleString()} enregistrements</div>
-              <div class="file-count">Date: ${fileDateText}</div>
-              <button class="download-link btn-danger" onclick="removeFile('${fileKey}')">🗑️ Supprimer</button>
-            `;
-          }
-        }
-      }
-
-      launchBtn.disabled = !allFilesLoaded;
-      document.getElementById("db-status").textContent = allFilesLoaded
-        ? "✅ Base opérationnelle"
-        : "ℹ️ Base partielle ou incomplète";
-    }
-
-    // ============================================
-    // TÉLÉCHARGEMENT AUTOMATIQUE DEPUIS REBRICKABLE
-    // ============================================
-    async function downloadAllFiles() {
-      const downloadBtn = document.getElementById('download-all-btn');
-      downloadBtn.disabled = true;
-      downloadBtn.innerHTML = '⏳ Téléchargement...';
-      
-      const globalProgress = document.getElementById('global-progress');
-      const globalProgressBar = document.getElementById('global-progress-bar');
-      const globalProgressText = document.getElementById('global-progress-text');
-      
-      globalProgress.style.display = 'block';
-      
-      const files = Object.keys(REQUIRED_FILES);
-      let completedFiles = 0;
-      
-      for (const fileKey of files) {
-        const file = REQUIRED_FILES[fileKey];
+    function setupGzFileInput() {
+      const gzInput = document.getElementById('gz-file-input');
+      gzInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        // Récupérer le fileKey stocké temporairement
+        const fileKey = gzInput.dataset.fileKey;
         
         try {
-          globalProgressText.textContent = `📥 Téléchargement de ${file.name}...`;
-          
-          const fileDiv = document.getElementById(`file-${fileKey}`);
-          const progressBar = document.getElementById(`progress-${fileKey}`);
-          const progressFill = document.getElementById(`progress-fill-${fileKey}`);
-          
-          fileDiv.className = 'file-item processing';
-          fileDiv.querySelector('.file-status-text').textContent = '⏳ Téléchargement...';
-          fileDiv.querySelector('.file-status-text').className = 'file-status-text processing';
-          progressBar.style.display = 'block';
-          
-          // Télécharger et décompresser
-          const csvText = await decompressor.downloadAndDecompress(
-            file.url,
-            (progress) => {
-              const percent = Math.min(95, progress.percentage.toFixed(0));
-              progressFill.style.width = `${percent}%`;
-            }
-          );
-          
-          fileDiv.querySelector('.file-status-text').textContent = '⏳ Analyse CSV...';
-          
-          // Analyser le CSV
-          const data = await new Promise((resolve, reject) => {
-            csvWorker.onmessage = (e) => {
-              if (e.data.type === "done") {
-                resolve(e.data.data);
-              }
-            };
-            csvWorker.onerror = reject;
-            csvWorker.postMessage({ text: csvText });
-          });
-          
-          if (data.length === 0) {
-            throw new Error('Aucune donnée valide trouvée');
-          }
-          
-          fileDiv.querySelector('.file-status-text').textContent = '📦 Enregistrement...';
-          
-          // Nettoyer les données
-          let cleanedData = data;
-          if (fileKey === "parts") cleanedData = window.cleanPartsData(data);
-          if (fileKey === "inventory_parts") cleanedData = window.cleanInventoryPartsData(data);
-          if (fileKey === "part_categories") cleanedData = window.cleanCategoriesData(data);
-          if (fileKey === "colors") cleanedData = window.cleanColorsData(data);
-          if (fileKey === "sets") cleanedData = window.cleanSetsData(data);
-          if (fileKey === "inventories") cleanedData = window.cleanInventoriesData(data);
-          if (fileKey === "minifigs") cleanedData = window.cleanMinifigsData(data);
-          if (fileKey === "inventory_minifigs") cleanedData = window.cleanInventoryMinifigsData(data);
-          
-          // Sauvegarder dans IndexedDB
-          await db.saveData(fileKey, cleanedData);
-          await db.setFileDate(fileKey, Date.now());
-          
-          fileDiv.className = 'file-item loaded';
-          fileDiv.querySelector('.file-status-text').textContent = '✅ Chargé';
-          fileDiv.querySelector('.file-status-text').className = 'file-status-text loaded';
-          progressBar.style.display = 'none';
-          
-          completedFiles++;
-          const globalPercent = ((completedFiles / files.length) * 100).toFixed(0);
-          globalProgressBar.style.width = `${globalPercent}%`;
-          globalProgressBar.textContent = `${globalPercent}%`;
-          
-          console.log(`✅ ${file.name}: ${cleanedData.length.toLocaleString()} enregistrements`);
-          
+          await processGzFile(file, fileKey);
         } catch (error) {
-          console.error(`❌ Erreur avec ${file.name}:`, error);
+          console.error('Erreur traitement fichier .gz:', error);
+          showErrorMessage(`Erreur: ${error.message}`);
+          
           const fileDiv = document.getElementById(`file-${fileKey}`);
           fileDiv.className = 'file-item missing';
           fileDiv.querySelector('.file-status-text').textContent = '❌ Erreur';
           fileDiv.querySelector('.file-status-text').className = 'file-status-text missing';
-          
-          showErrorMessage(`Erreur avec ${file.name}: ${error.message}`);
         }
-      }
+        
+        // Réinitialiser l'input
+        e.target.value = '';
+      });
+    }
+
+    function downloadFile(fileKey) {
+      const file = REQUIRED_FILES[fileKey];
+      const gzInput = document.getElementById('gz-file-input');
       
-      globalProgressText.textContent = '✅ Téléchargement terminé !';
+      // Stocker le fileKey pour l'utiliser après la sélection
+      gzInput.dataset.fileKey = fileKey;
       
+      // Message à l'utilisateur
+      showInfoMessage(`Veuillez télécharger le fichier ${file.name} depuis votre navigateur, puis le sélectionner.`);
+      
+      // Ouvrir le lien de téléchargement dans un nouvel onglet
+      window.open(file.url, '_blank');
+      
+      // Ouvrir le sélecteur de fichier après un court délai
       setTimeout(() => {
-        globalProgress.style.display = 'none';
-      }, 3000);
-      
-      downloadBtn.disabled = false;
-      downloadBtn.innerHTML = '📥 Télécharger depuis Rebrickable';
-      
-      await updateFileStatus();
+        gzInput.click();
+      }, 1000);
     }
 
-    // ============================================
-    // IMPORT MANUEL DE CSV
-    // ============================================
-    async function handleFiles(files) {
-      document.getElementById('upload-area').style.display = 'block';
-      
-      for (let file of files) {
-        if (!file.name.endsWith('.csv')) {
-          showErrorMessage(`Fichier ignoré: ${file.name} (seuls les .csv sont acceptés)`);
-          continue;
-        }
-        
-        let fileKey = null;
-        const lowerName = file.name.toLowerCase();
-
-        if (lowerName === 'parts.csv') fileKey = 'parts';
-        else if (lowerName === 'part_categories.csv') fileKey = 'part_categories';
-        else if (lowerName === 'inventory_parts.csv') fileKey = 'inventory_parts';
-        else if (lowerName === 'colors.csv') fileKey = 'colors';
-        else if (lowerName === 'sets.csv') fileKey = 'sets';
-        else if (lowerName === 'inventories.csv') fileKey = 'inventories';
-        else if (lowerName === 'minifigs.csv') fileKey = 'minifigs';
-        else if (lowerName === 'inventory_minifigs.csv') fileKey = 'inventory_minifigs';
-        
-        if (!fileKey) {
-          showErrorMessage(`Type de fichier non reconnu: ${file.name}`);
-          continue;
-        }
-        
-        await processFile(file, fileKey);
-      }
-      
-      await updateFileStatus();
-    }
-
-    async function processFile(file, fileKey) {
+    async function processGzFile(file, fileKey) {
       const fileDiv = document.getElementById(`file-${fileKey}`);
       const progressBar = document.getElementById(`progress-${fileKey}`);
       const progressFill = document.getElementById(`progress-fill-${fileKey}`);
+      const downloadBtn = document.getElementById(`download-btn-${fileKey}`);
 
       try {
         fileDiv.className = 'file-item processing';
-        fileDiv.querySelector('.file-status-text').textContent = '⏳ Lecture...';
+        fileDiv.querySelector('.file-status-text').textContent = '⏳ Décompression...';
         fileDiv.querySelector('.file-status-text').className = 'file-status-text processing';
         progressBar.style.display = 'block';
+        downloadBtn.disabled = true;
 
-        const text = await file.text();
-        if (text.length < 100) throw new Error('Fichier trop petit ou vide');
-
+        // Lire le fichier .gz
+        const arrayBuffer = await file.arrayBuffer();
+        const compressed = new Uint8Array(arrayBuffer);
+        
+        progressFill.style.width = '30%';
+        
+        // Décompresser
+        await decompressor.loadPako();
+        const decompressed = decompressor.pako.inflate(compressed);
+        
+        progressFill.style.width = '50%';
+        fileDiv.querySelector('.file-status-text').textContent = '⏳ Conversion...';
+        
+        // Convertir en texte
+        const decoder = new TextDecoder('utf-8');
+        const csvText = decoder.decode(decompressed);
+        
+        console.log(`✅ ${file.name} décompressé: ${csvText.length.toLocaleString()} caractères`);
+        
+        progressFill.style.width = '60%';
         fileDiv.querySelector('.file-status-text').textContent = '⏳ Analyse CSV...';
-        progressFill.style.width = '10%';
-
+        
+        // Analyser le CSV
         const data = await new Promise((resolve, reject) => {
           csvWorker.onmessage = (e) => {
             if (e.data.type === "progress") {
-              progressFill.style.width = `${10 + e.data.value * 40}%`;
+              progressFill.style.width = `${60 + e.data.value * 20}%`;
             } else if (e.data.type === "done") {
               resolve(e.data.data);
             }
           };
           csvWorker.onerror = reject;
-          csvWorker.postMessage({ text });
+          csvWorker.postMessage({ text: csvText });
         });
 
-        if (data.length === 0) throw new Error('Aucune donnée valide');
+        if (data.length === 0) {
+          throw new Error('Aucune donnée valide trouvée');
+        }
 
+        progressFill.style.width = '80%';
         fileDiv.querySelector('.file-status-text').textContent = '📦 Enregistrement...';
-        progressFill.style.width = '60%';
 
+        // Nettoyer les données
         let cleanedData = data;
         if (fileKey === "parts") cleanedData = window.cleanPartsData(data);
         if (fileKey === "inventory_parts") cleanedData = window.cleanInventoryPartsData(data);
@@ -435,22 +254,31 @@
         if (fileKey === "minifigs") cleanedData = window.cleanMinifigsData(data);
         if (fileKey === "inventory_minifigs") cleanedData = window.cleanInventoryMinifigsData(data);
 
+        // Sauvegarder dans IndexedDB
         await db.saveData(fileKey, cleanedData, (current, total) => {
-          const percentage = 60 + (current / total) * 40;
+          const percentage = 80 + (current / total) * 20;
           progressFill.style.width = `${percentage}%`;
         });
 
-        await db.setFileDate(fileKey, file.lastModified);
+        await db.setFileDate(fileKey, Date.now());
 
         progressFill.style.width = '100%';
+        
         setTimeout(() => {
           fileDiv.className = 'file-item loaded';
           fileDiv.querySelector('.file-status-text').textContent = '✅ Chargé';
           fileDiv.querySelector('.file-status-text').className = 'file-status-text loaded';
           progressBar.style.display = 'none';
+          
+          // Remplacer le bouton par un indicateur de succès
+          downloadBtn.innerHTML = '✅ Chargé';
+          downloadBtn.className = 'btn btn-sm btn-success';
+          downloadBtn.disabled = true;
         }, 500);
 
-        showSuccessMessage(`${file.name}: ${cleanedData.length.toLocaleString()} enregistrements`);
+        showSuccessMessage(`${REQUIRED_FILES[fileKey].name}: ${cleanedData.length.toLocaleString()} enregistrements chargés`);
+        
+        await updateFileStatus();
 
       } catch (error) {
         console.error('Erreur:', error);
@@ -458,25 +286,56 @@
         fileDiv.querySelector('.file-status-text').textContent = '❌ Erreur';
         fileDiv.querySelector('.file-status-text').className = 'file-status-text missing';
         progressBar.style.display = 'none';
-        showErrorMessage(`Erreur avec ${file.name}: ${error.message}`);
-      }
-    }
-
-    async function removeFile(fileKey) {
-      if (confirm(`Supprimer ${REQUIRED_FILES[fileKey].name} ?`)) {
-        const transaction = db.db.transaction([fileKey, 'metadata'], 'readwrite');
-        await transaction.objectStore(fileKey).clear();
-        await transaction.objectStore('metadata').delete(`${fileKey}_last_update`);
-        await transaction.objectStore('metadata').delete(`${fileKey}_file_date`);
-        await transaction.objectStore('metadata').delete(`${fileKey}_count`);
+        downloadBtn.disabled = false;
         
-        await updateFileStatus();
-        showInfoMessage(`${REQUIRED_FILES[fileKey].name} supprimé.`);
+        throw error;
       }
     }
 
-    async function checkForUpdates() {
-      showInfoMessage('Les fichiers Rebrickable sont mis à jour quotidiennement. Utilisez "📥 Télécharger depuis Rebrickable" pour obtenir la dernière version.');
+    async function updateFileStatus() {
+      const launchBtn = document.getElementById('launch-app');
+      let allFilesLoaded = true;
+
+      for (const fileKey of Object.keys(REQUIRED_FILES)) {
+        const count = await db.getTableCount(fileKey);
+        const isLoaded = count > 0;
+        
+        if (!isLoaded) {
+          allFilesLoaded = false;
+        } else {
+          const fileDiv = document.getElementById(`file-${fileKey}`);
+          const downloadBtn = document.getElementById(`download-btn-${fileKey}`);
+          
+          if (downloadBtn && !downloadBtn.classList.contains('btn-success')) {
+            downloadBtn.innerHTML = '✅ Chargé';
+            downloadBtn.className = 'btn btn-sm btn-success';
+            downloadBtn.disabled = true;
+          }
+          
+          const fileDate = await db.getFileDate(fileKey);
+          const fileDateText = fileDate ? new Date(fileDate).toLocaleDateString() : 'Date inconnue';
+          
+          fileDiv.className = 'file-item loaded';
+          fileDiv.querySelector('.file-status-text').textContent = '✅ Chargé';
+          fileDiv.querySelector('.file-status-text').className = 'file-status-text loaded';
+          
+          // Ajouter info de comptage si pas déjà présent
+          if (!fileDiv.querySelector('.file-count')) {
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'file-count';
+            infoDiv.style.fontSize = '0.8em';
+            infoDiv.style.color = '#666';
+            infoDiv.style.marginTop = '5px';
+            infoDiv.innerHTML = `${count.toLocaleString()} enregistrements • ${fileDateText}`;
+            fileDiv.querySelector('.file-status-text').after(infoDiv);
+          }
+        }
+      }
+
+      launchBtn.disabled = !allFilesLoaded;
+      document.getElementById("db-status").textContent = allFilesLoaded
+        ? "✅ Base opérationnelle"
+        : "ℹ️ Base partielle ou incomplète";
     }
 
     async function clearAllData() {

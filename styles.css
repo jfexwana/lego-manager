@@ -1323,4 +1323,70 @@ body.dark-mode .modal.import-modal {
 }
 
 @media (max-width: 768px) {
-  .file-manager
+  .file-manager-section > div[style*="display: flex"] {
+flex-direction: column;
+}
+.file-manager-section > div[style*="display: flex"] .btn {
+width: 100%;
+margin: 5px 0;
+}
+}
+
+/* Boutons de téléchargement */
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 0.9em;
+}
+
+.btn-success {
+  background-color: #4caf50 !important;
+  color: white !important;
+  cursor: not-allowed !important;
+  opacity: 0.8;
+}
+
+.download-btn {
+  min-width: 120px;
+}
+
+/* File items responsive */
+.file-item {
+  padding: 15px;
+  margin-bottom: 15px;
+  border-radius: 8px;
+  border: 2px solid #e0e0e0;
+  transition: all 0.3s ease;
+}
+
+.file-item.processing {
+  border-color: #ff9800;
+  background-color: #fff3e0;
+}
+
+.file-item.loaded {
+  border-color: #4caf50;
+  background-color: #f1f8e9;
+}
+
+.file-item.missing {
+  border-color: #f44336;
+  background-color: #ffebee;
+}
+
+/* Responsive pour mobile */
+@media (max-width: 768px) {
+  .file-item > div[style*="display: flex"] {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
+  
+  .file-item > div[style*="display: flex"] > div:last-child {
+    width: 100% !important;
+    text-align: left !important;
+    margin-top: 10px;
+  }
+  
+  .download-btn {
+    width: 100%;
+  }
+}
