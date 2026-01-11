@@ -1,5 +1,5 @@
-const CACHE_NAME = 'lego-manager-v1.2'; // ⬅️ Changez la version !
-const BASE_PATH = '/lego-manager'; // ⬅️ Remplacez par votre repo
+const BASE_PATH = '/lego-manager'; // Pour GitHub Pages
+const CACHE_NAME = `${BASE_PATH}-cache-v1.2`;
 
 const urlsToCache = [
   `${BASE_PATH}/`,
@@ -14,40 +14,16 @@ const urlsToCache = [
   `${BASE_PATH}/keywords.js`,
   `${BASE_PATH}/auth.js`,
   `${BASE_PATH}/category-images.json`,
-  `${BASE_PATH}/analysis-worker.js`
-  `${BASE_PATH}/gz-decompressor.js`
+  `${BASE_PATH}/analysis-worker.js`, // ⚠️ VIRGULE AJOUTÉE
+  `${BASE_PATH}/gz-decompressor.js`,
+  `${BASE_PATH}/icon-192.png`,
+  `${BASE_PATH}/icon-512.png`,
+  `${BASE_PATH}/manifest.json`
 ];
-
-// Ne PAS cacher les fichiers .gz de Rebrickable
-self.addEventListener('fetch', event => {
-  const url = event.request.url;
-  
-  // Ne pas intercepter les requêtes vers Rebrickable
-  if (url.includes('rebrickable.com') || url.includes('cdnjs.cloudflare.com')) {
-    event.respondWith(fetch(event.request));
-    return;
-  }
-  
-  event.respondWith(
-    fetch(event.request)
-      .then(response => {
-        const responseClone = response.clone();
-        
-        caches.open(CACHE_NAME).then(cache => {
-          cache.put(event.request, responseClone);
-        });
-        
-        return response;
-      })
-      .catch(() => {
-        return caches.match(event.request);
-      })
-  );
-});
 
 // Installation du Service Worker
 self.addEventListener('install', event => {
-  console.log('Service Worker: Installation v1.1');
+  console.log('Service Worker: Installation v1.2');
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
@@ -61,7 +37,7 @@ self.addEventListener('install', event => {
 
 // Activation - Nettoyer les anciens caches
 self.addEventListener('activate', event => {
-  console.log('Service Worker: Activation v1.1');
+  console.log('Service Worker: Activation v1.2');
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
@@ -77,11 +53,23 @@ self.addEventListener('activate', event => {
   return self.clients.claim();
 });
 
-// Fetch avec chemins corrigés
+// Fetch - Stratégie Network First avec fallback Cache
 self.addEventListener('fetch', event => {
+  const url = event.request.url;
+  
+  // Ne pas intercepter les requêtes externes (Rebrickable, CDN)
+  if (url.includes('rebrickable.com') || 
+      url.includes('cdnjs.cloudflare.com') ||
+      url.includes('googleapis.com')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+  
+  // Pour les ressources locales: Network First, puis Cache
   event.respondWith(
     fetch(event.request)
       .then(response => {
+        // Cloner la réponse avant de la mettre en cache
         const responseClone = response.clone();
         
         caches.open(CACHE_NAME).then(cache => {
@@ -91,7 +79,18 @@ self.addEventListener('fetch', event => {
         return response;
       })
       .catch(() => {
-        return caches.match(event.request);
+        // Si le réseau échoue, utiliser le cache
+        return caches.match(event.request)
+          .then(cachedResponse => {
+            if (cachedResponse) {
+              return cachedResponse;
+            }
+            // Si pas en cache non plus, retourner une page d'erreur basique
+            return new Response('Offline - Resource not available', {
+              status: 503,
+              statusText: 'Service Unavailable'
+            });
+          });
       })
   );
 });
